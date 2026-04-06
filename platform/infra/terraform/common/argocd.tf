@@ -16,11 +16,11 @@ module "gitops_bridge_bootstrap" {
   install = true  # Install ArgoCD via Helm (needed when EKS ArgoCD Capability is not available)
   
   cluster = {
-    cluster_name = local.hub_cluster.name  # Use actual cluster name like working account
+    cluster_name = local.hub_cluster.name
     environment  = local.hub_cluster.environment
     metadata     = local.addons_metadata[local.hub_cluster_key]
     addons       = local.addons[local.hub_cluster_key]
-    server       = data.aws_eks_cluster.clusters[local.hub_cluster_key].arn
+    server       = "https://kubernetes.default.svc"
   }
 
   apps = local.argocd_apps

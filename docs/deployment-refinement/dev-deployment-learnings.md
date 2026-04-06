@@ -155,3 +155,107 @@ Option 1 is cleaner — a general-purpose node pool is needed anyway for GitLab,
 ### What this means for the dev path
 
 The hub cluster needs `node_pools: ["system", "general-purpose"]` instead of just `["system"]`. This is a `hub-config.yaml` change or a Terraform variable override.
+
+
+---
+
+## Phase 2 Success — With Workarounds
+
+### What worked
+- GitLab infrastructure deployed (NLB, CloudFront VPC Origin, CloudFront distribution, Helm chart)
+- GitLab CloudFront domain: `d1zpajxmobzscu.cloudfront.net` (from `gitlab_infra` sub-stack, separate from main ingress CloudFront)
+- Main common stack: all resources created (secrets, ArgoCD bootstrap, pod identity, AMP scrapers, Grafana workspace, ingress, CloudFront)
+- AMP scrapers both created successfully this time (~16 min each)
+- ArgoCD Helm release recovered after manual `helm upgrade` to fix failed status
+
+### Issues encountered
+
+1. **ArgoCD Helm timeout** — The gitops_bridge_bootstrap module installs ArgoCD via Helm with a default timeout. On EKS Auto Mode with only `system` node pool, pods can't schedule (CriticalAddonsOnly taint). The Helm install times out waiting for pods to be ready.
+
+2. **General-purpose node pool required** — Had to add `"general-purpose"` to `compute_config.node_pools` in `cluster/main.tf` for all clusters. This is needed for any workload that isn't a critical system addon.
+
+3. **Helm release failed state** — After the timeout, the Helm release was in `failed` state. Even though the pods eventually started (once general-purpose nodes appeared), Terraform kept trying to uninstall and reinstall. Fixed with `helm upgrade --reuse-values` to flip the status to `deployed`.
+
+4. **ARGOCD_DOMAIN unbound variable** — The `update_backstage_defaults` function in `deploy.sh` references `ARGOCD_DOMAIN` which isn't set in the dev path (it's set by `1-tools-urls.sh` or the workshop environment). The `set -euo pipefail` kills the script. Non-critical — the Terraform apply already completed.
+
+5. **Backend config mismatch** — Manually running `terraform init` with different backend-config keys than what `deploy.sh` uses causes "Backend configuration changed" errors. Never manually init — always let `deploy.sh` handle it, or match the exact key from `versions.tf`.
+
+### Changes made for this phase
+- `platform/infra/terraform/common/argocd.tf` — changed `install = false` to `install = true` in gitops_bridge_bootstrap module
+- `platform/infra/terraform/cluster/main.tf` — added `"general-purpose"` to `compute_config.node_pools`
+- `platform/infra/terraform/common/deploy.sh` — wrapped GitLab domain retrieval in SKIP_GITLAB conditional
+
+
+---
+
+## Phase 3: 0-init.sh — Multiple Issues
+
+### macOS `timeout` command missing
+
+The script uses `timeout` (GNU coreutils) which doesn't exist on macOS. ArgoCD readiness check silently fails and loops for 30 minutes.
+
+**Fix:** Installed `coreutils` via brew and added `/opt/homebrew/opt/coreutils/libexec/gnubin` to PATH.
+
+### Cluster secrets use ARNs instead of endpoints
+
+The gitops_bridge_bootstrap module sets the cluster secret `server` field to the EKS cluster ARN. EKS Managed ArgoCD can resolve ARNs natively. Helm-installed ArgoCD cannot — it tries to parse the ARN as an HTTP URL and fails.
+
+**Fix:** Manually patched all 3 cluster secrets (hub, spoke-dev, spoke-prod) to use actual endpoints:
+- Hub: `https://kubernetes.default.svc` (in-cluster)
+- Spoke-dev: actual EKS API endpoint
+- Spoke-prod: actual EKS API endpoint
+
+**Root cause:** The `gitops_bridge_bootstrap` module's `server` field is set to `data.aws_eks_cluster.clusters[local.hub_cluster_key].arn` in `argocd.tf`. For Helm-installed ArgoCD, this should be the actual endpoint URL.
+
+### Spoke cluster secrets lack authentication
+
+The fleet-secret ExternalSecrets create spoke cluster secrets with only TLS config — no authentication credentials. EKS Managed ArgoCD authenticates via its IAM capability role. Helm-installed ArgoCD needs either:
+1. A bearer token (service account token from the spoke cluster)
+2. An `execProviderConfig` that runs `aws eks get-token`
+3. An IAM role ARN with `awsAuthConfig`
+
+Without authentication, ArgoCD can reach the spoke API endpoints but gets 401 Unauthorized.
+
+**This is the biggest gap between EKS Managed ArgoCD and Helm-installed ArgoCD.** The entire fleet management pattern assumes EKS Managed ArgoCD's transparent IAM authentication.
+
+### `grep -P` not available on macOS
+
+Multiple places in the scripts use `grep -P` (Perl regex) which macOS grep doesn't support. Non-fatal but produces error output.
+
+### Missing workshop environment files
+
+`0-init.sh` sources `/etc/profile.d/workshop.sh` and `/home/ec2-user/.bashrc.d/platform.sh` which don't exist on a local machine. Non-fatal — the script continues.
+
+---
+
+## Critical Finding: Helm ArgoCD Cannot Manage Spoke Clusters Without Auth Config
+
+The entire multi-cluster GitOps pattern relies on ArgoCD being able to deploy to spoke clusters. With EKS Managed ArgoCD, this works transparently via IAM roles. With Helm-installed ArgoCD, the spoke cluster secrets need explicit authentication configuration.
+
+Options to fix:
+1. Add `awsAuthConfig` with the ArgoCD hub role ARN to spoke cluster secrets
+2. Create service account tokens on spoke clusters and add them to the secrets
+3. Use an exec-based auth provider (`aws eks get-token`) in the cluster config
+
+Option 1 is cleanest — the IAM role already exists (`peeks-argocd-hub-*`), and the spoke clusters already have access entries for it. We just need to add it to the cluster secret config.
+
+
+---
+
+## Step Back: ExternalSecrets Overwrites Manual Patches
+
+### Problem
+Manual patches to spoke cluster secrets (server URL, auth config) get overwritten every 60 seconds by the ExternalSecrets operator, which reconciles from AWS Secrets Manager.
+
+### Failed approach
+Setting `reconcile.external-secrets.io/managed=false` annotation didn't prevent reconciliation — the ExternalSecret resource still syncs on its refresh interval.
+
+### Correct approach
+The source of truth is `platform/infra/terraform/common/secrets.tf`. The `aws_secretsmanager_secret_version.cluster_config` resource writes the cluster config to Secrets Manager. For Helm ArgoCD, this needs:
+1. `server` field: actual EKS API endpoint instead of ARN
+2. `config` field: `awsAuthConfig` with cluster name and role ARN, plus CA data
+
+This requires modifying `secrets.tf` and rerunning `terraform apply` for the common stack. The ExternalSecrets will then pick up the correct values automatically.
+
+### Key insight
+You cannot work around the ExternalSecrets reconciliation loop with manual patches. The Terraform code that writes to Secrets Manager is the only place to fix this properly. This is actually good design — single source of truth — but it means every fix must go through Terraform, not kubectl.
