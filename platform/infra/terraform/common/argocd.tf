@@ -13,7 +13,7 @@ module "gitops_bridge_bootstrap" {
   version = "0.1.0"
   
   create  = true
-  install = false  # Skip ArgoCD installation, only create cluster secret
+  install = true  # Install ArgoCD via Helm (needed when EKS ArgoCD Capability is not available)
   
   cluster = {
     cluster_name = local.hub_cluster.name  # Use actual cluster name like working account

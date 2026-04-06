@@ -104,15 +104,24 @@ main() {
     fi
   fi
 
-  # Get gitlab cloudfront domain from gitlab infra stack
-  export GITLAB_DOMAIN=$(terraform -chdir=$DEPLOY_SCRIPTDIR/gitlab_infra output -raw gitlab_domain_name)
-  GITLAB_SG_ID=$(terraform -chdir=$DEPLOY_SCRIPTDIR/gitlab_infra output -raw gitlab_security_groups)
+  if ! $SKIP_GITLAB ; then
+    # Get gitlab cloudfront domain from gitlab infra stack
+    export GITLAB_DOMAIN=$(terraform -chdir=$DEPLOY_SCRIPTDIR/gitlab_infra output -raw gitlab_domain_name)
+    GITLAB_SG_ID=$(terraform -chdir=$DEPLOY_SCRIPTDIR/gitlab_infra output -raw gitlab_security_groups)
 
-  # Create spoke cluster secret values
-  create_spoke_cluster_secret_values
+    # Create spoke cluster secret values
+    create_spoke_cluster_secret_values
 
-  # Push repo to Gitlab
-  gitlab_repository_setup
+    # Push repo to Gitlab
+    gitlab_repository_setup
+  else
+    log "Skipping GitLab domain retrieval and repo setup (SKIP_GITLAB=true)"
+    export GITLAB_DOMAIN="${GITLAB_DOMAIN:-""}"
+    GITLAB_SG_ID="${GITLAB_SG_ID:-""}"
+
+    # Still create spoke cluster secret values
+    create_spoke_cluster_secret_values
+  fi
   
   # Initialize Terraform with S3 backend
   initialize_terraform "bootstrap" "$DEPLOY_SCRIPTDIR"
