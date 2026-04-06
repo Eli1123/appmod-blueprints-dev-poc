@@ -128,3 +128,30 @@ The `gitops_bridge_bootstrap` module in `argocd.tf` has `install = false` — it
 2. **Identity Center availability** — Does account `612524168818` have AWS Organizations and Identity Center available? If not, the ArgoCD capability path is blocked and we need the Helm fallback.
 
 3. **CloudFront for GitLab** — The `gitlab_infra` sub-stack creates its own CloudFront distribution. In the CDK path, there's a separate CloudFront for the main ingress. Are both needed?
+
+
+---
+
+## ArgoCD Helm Install — Node Scheduling Issue
+
+### Problem
+
+ArgoCD pods installed via Helm are stuck in `Pending` because the hub cluster only has EKS Auto Mode `system` node pool nodes, which carry a `CriticalAddonsOnly:NoSchedule` taint. ArgoCD pods don't have tolerations for this taint.
+
+### Root Cause
+
+EKS Auto Mode with `node_pools: ["system"]` only creates nodes for critical system addons. In the normal flow, ArgoCD runs as an EKS Managed Capability which handles its own scheduling (likely runs on the system nodes with the right tolerations). When installing ArgoCD via Helm, the pods are treated as regular workloads and can't schedule on system nodes.
+
+### Fix Options
+
+1. Add a `general-purpose` node pool to the hub cluster config — this creates nodes without the `CriticalAddonsOnly` taint
+2. Add tolerations to the ArgoCD Helm values so it can run on system nodes
+3. Both
+
+### Decision
+
+Option 1 is cleaner — a general-purpose node pool is needed anyway for GitLab, Backstage, Keycloak, and other platform services that also won't tolerate the system taint. This is likely why the normal flow works: the EKS capabilities (ArgoCD, ACK, Kro) run on system nodes, but everything else (deployed via Helm/ArgoCD) needs general-purpose nodes.
+
+### What this means for the dev path
+
+The hub cluster needs `node_pools: ["system", "general-purpose"]` instead of just `["system"]`. This is a `hub-config.yaml` change or a Terraform variable override.
