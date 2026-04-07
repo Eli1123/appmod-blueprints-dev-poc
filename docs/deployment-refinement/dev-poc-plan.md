@@ -24,7 +24,22 @@ Use the dev deployment mode to deploy the platform from a personal GitHub fork, 
 
 ---
 
-## Phase 1: Fork + Git Provider Setup
+## Phase 1: Fork + Git Provider Setup — ✅ COMPLETE
+
+### What Was Done
+
+- Forked `aws-samples/appmod-blueprints` to `https://github.com/Eli1123/appmod-blueprints-dev-poc.git` (public)
+- Pushed all local dev mode changes to the fork
+- Updated `hub-config.yaml` repo URL to point to the fork
+- Updated `common/variables.tf` repo default to match
+- Ran terraform apply — cluster secret annotations updated
+- ArgoCD re-synced all ApplicationSets from the fork
+- Result: 60 apps, 59 healthy. Chart changes now take effect on push.
+
+### What's Not Done Yet
+
+- GitHub PAT for write access (not needed yet — repo is public and we haven't tested Backstage scaffolding)
+- ArgoCD git secrets for authenticated access (not needed for public repo reads)
 
 ### 1.1 Create GitHub Fork
 

@@ -623,3 +623,37 @@ This is a fundamental tension in the dev mode design. Possible solutions for the
 | `.kiro/steering/deployment-refinement.md` | Updated status, added dev deployment guide reference |
 | `docs/deployment-refinement/dev-deployment-learnings.md` | This file — full running log |
 | `docs/deployment-refinement/dev-deployment-guide.md` | New — getting started guide for dev mode |
+
+
+---
+
+## Session 3: Fork Setup + ArgoCD Repo Switch
+
+### Fork Created
+
+- Fork: `https://github.com/Eli1123/appmod-blueprints-dev-poc.git` (public)
+- Added as git remote `myfork`
+- Pushed all local changes (dev mode conditionals, Backstage chart fix, docs) to the fork
+
+### ArgoCD Pointed to Fork
+
+**Changes made:**
+- `hub-config.yaml` — changed `repo.url` from `https://github.com/aws-samples/appmod-blueprints` to `https://github.com/Eli1123/appmod-blueprints-dev-poc`
+- `common/variables.tf` — updated `repo` variable default URL to match
+
+**Applied via terraform:** Regenerated tfvars, ran terraform apply. The hub cluster secret annotation `addons_repo_url` now points to the fork. All ArgoCD ApplicationSets re-synced from the fork.
+
+### Result After Fork Switch
+
+- 60 total apps, 59 healthy
+- `cluster-addons` shows as Degraded — this is cosmetic. The ApplicationSets it manages show as "Degraded" in the parent app's health check, but the actual Applications they generate are all Healthy. This is an ArgoCD health assessment quirk, not a real issue.
+- The Backstage chart fix (conditional GitLab/GitHub integration) is now served from the fork, so ArgoCD will keep it in sync. No more manual ConfigMap patching needed.
+- The `gitlab` ApplicationSet shows as `Missing` in cluster-addons — correct, since `enable_gitlab: false`.
+
+### Key Benefit of Fork
+
+With the fork, changes to GitOps charts (Helm templates, values) take effect immediately when pushed. This eliminates the biggest limitation of dev mode — previously, chart changes required upstream merge to the public repo. Now we control the full pipeline: local edit → git push → ArgoCD sync.
+
+### Phase 1 of POC Plan: COMPLETE
+
+The fork-based deployment is working. ArgoCD reads from the fork, all apps are healthy, and we can push changes that ArgoCD picks up automatically.
