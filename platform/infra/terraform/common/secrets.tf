@@ -100,22 +100,34 @@ resource "aws_secretsmanager_secret_version" "cluster_config" {
   secret_string = jsonencode({
     metadata = local.addons_metadata[each.key]
     addons   = local.addons[each.key]
-    server   = each.value.environment != "control-plane" ? data.aws_eks_cluster.clusters[each.key].endpoint : ""
+    # In dev mode: use actual endpoint URLs (Helm ArgoCD can't resolve ARNs)
+    # In gitlab mode: use cluster ARNs (EKS Managed ArgoCD resolves them natively)
+    server = each.value.environment != "control-plane" ? (
+      var.deployment_mode == "dev" ? data.aws_eks_cluster.clusters[each.key].endpoint : data.aws_eks_cluster.clusters[each.key].arn
+    ) : ""
     vpc = {
       id                         = local.cluster_vpc_ids[each.value.name]
       subnet_ids                 = data.aws_subnets.private_subnets[each.key].ids
       cluster_security_group_id  = data.aws_eks_cluster.clusters[each.key].vpc_config[0].cluster_security_group_id
     }
-    config = each.value.environment != "control-plane" ? jsonencode({
-      awsAuthConfig = {
-        clusterName = each.value.name
-        roleARN     = aws_iam_role.spoke[each.key].arn
-      }
-      tlsClientConfig = {
-        insecure = false
-        caData   = data.aws_eks_cluster.clusters[each.key].certificate_authority[0].data
-      }
-    }) : jsonencode({
+    # In dev mode: Helm ArgoCD needs explicit awsAuthConfig with role ARN and CA data
+    # In gitlab mode: EKS Managed ArgoCD authenticates transparently via IAM
+    config = each.value.environment != "control-plane" ? (
+      var.deployment_mode == "dev" ? jsonencode({
+        awsAuthConfig = {
+          clusterName = each.value.name
+          roleARN     = aws_iam_role.spoke[each.key].arn
+        }
+        tlsClientConfig = {
+          insecure = false
+          caData   = data.aws_eks_cluster.clusters[each.key].certificate_authority[0].data
+        }
+      }) : jsonencode({
+        tlsClientConfig = {
+          insecure = false
+        }
+      })
+    ) : jsonencode({
       tlsClientConfig = {
         insecure = false
       }
@@ -175,4 +187,72 @@ resource "aws_secretsmanager_secret_version" "argorollouts_secret_version" {
     amp-region    = local.hub_cluster.region
     amp-workspace = module.managed_service_prometheus.workspace_prometheus_endpoint
   })
+}
+
+################################################################################
+# Dev Mode: Create spoke cluster ExternalSecrets directly
+# In gitlab mode, these are created by the fleet-secrets ApplicationSet
+# which reads member directories from the GitLab repo. In dev mode,
+# the GitHub repo doesn't have these directories, so we create them here.
+################################################################################
+
+resource "kubernetes_manifest" "spoke_external_secrets" {
+  for_each = var.deployment_mode == "dev" ? local.spoke_clusters : {}
+
+  depends_on = [
+    module.gitops_bridge_bootstrap,
+    module.external_secrets_pod_identity
+  ]
+
+  manifest = {
+    apiVersion = "external-secrets.io/v1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = "fleet-${each.value.name}-fleet-secret"
+      namespace = "argocd"
+    }
+    spec = {
+      secretStoreRef = {
+        kind = "ClusterSecretStore"
+        name = "aws-secrets-manager"
+      }
+      refreshInterval = "1m"
+      target = {
+        name           = "fleet-${each.value.name}-fleet-secret"
+        creationPolicy = "Owner"
+        template = {
+          engineVersion = "v2"
+          templateFrom = [
+            {
+              target  = "Annotations"
+              literal = "{{ .metadata }}"
+            },
+            {
+              target  = "Labels"
+              literal = "{{ .addons }}"
+            },
+            {
+              target  = "Labels"
+              literal = "argocd.argoproj.io/secret-type: cluster"
+            }
+          ]
+          data = {
+            config = "{{ .config }}"
+            name   = each.value.name
+            server = "{{ .server }}"
+          }
+        }
+      }
+      dataFrom = [
+        {
+          extract = {
+            key                = "${each.value.name}/config"
+            conversionStrategy = "Default"
+            decodingStrategy   = "None"
+            metadataPolicy     = "None"
+          }
+        }
+      ]
+    }
+  }
 }

@@ -20,6 +20,15 @@ source $SCRIPTDIR/../scripts/utils.sh
 # Check if clusters are created through Workshop
 export WORKSHOP_CLUSTERS=${WORKSHOP_CLUSTERS:-false}
 
+# Deployment mode: 'gitlab' (default) or 'dev' (no GitLab, no IDC, Helm ArgoCD)
+export DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-gitlab}
+
+# In dev mode, automatically skip GitLab
+if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
+  export SKIP_GITLAB=true
+  log "Dev deployment mode: SKIP_GITLAB=true (auto-set)"
+fi
+
 # Main deployment function
 main() {
   log "Starting bootstrap stack deployment..."
@@ -46,6 +55,15 @@ main() {
 
   export GENERATED_TFVAR_FILE="$(mktemp).tfvars.json"
   yq eval -o=json '.' $CONFIG_FILE > $GENERATED_TFVAR_FILE
+
+  # In dev mode, disable GitLab addon in the generated tfvars
+  # (GitLab has no infrastructure in dev mode, so the addon would just be broken)
+  if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
+    log "Dev mode: disabling enable_gitlab in cluster config"
+    local PATCHED_TFVAR_FILE="$(mktemp).tfvars.json"
+    jq '.clusters |= with_entries(.value.addons.enable_gitlab = false)' "$GENERATED_TFVAR_FILE" > "$PATCHED_TFVAR_FILE"
+    export GENERATED_TFVAR_FILE="$PATCHED_TFVAR_FILE"
+  fi
 
   if ! $SKIP_GITLAB ; then
     # Initialize Terraform with S3 backend
@@ -151,6 +169,7 @@ main() {
       
       if terraform -chdir=$DEPLOY_SCRIPTDIR apply \
         -var-file="${GENERATED_TFVAR_FILE}" \
+        -var="deployment_mode=${DEPLOYMENT_MODE}" \
         -var="gitlab_domain_name=${GITLAB_DOMAIN:-""}" \
         -var="gitlab_security_groups=${GITLAB_SG_ID:-""}" \
         -var="ide_password=${USER1_PASSWORD}" \
@@ -186,11 +205,15 @@ main() {
   # Get Ingress domain from Terraform output
   export INGRESS_DOMAIN=$(terraform -chdir=$DEPLOY_SCRIPTDIR output -raw ingress_domain_name)
 
-  # Update backstage default values now that both domains are available
-  update_backstage_defaults
-  
-  # Push repo to Gitlab
-  gitlab_repository_setup
+  if [[ "${DEPLOYMENT_MODE}" != "dev" ]]; then
+    # Update backstage default values now that both domains are available
+    update_backstage_defaults
+    
+    # Push repo to Gitlab
+    gitlab_repository_setup
+  else
+    log "Dev mode: skipping Backstage defaults update and GitLab repo push"
+  fi
   
   log_success "Bootstrap stack deployment completed successfully"
 }

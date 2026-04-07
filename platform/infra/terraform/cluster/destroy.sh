@@ -52,6 +52,7 @@ main() {
     -var="hub_vpc_id=${HUB_VPC_ID}" \
     -var="hub_subnet_ids=$(echo "${HUB_SUBNET_IDS}" | sed "s/'/\"/g")" \
     -var="resource_prefix=${RESOURCE_PREFIX}" \
+    -var="deployment_mode=${DEPLOYMENT_MODE:-gitlab}" \
     -var="workshop_participant_role_arn=${WS_PARTICIPANT_ROLE_ARN}" \
     -auto-approve; then
     log_warning "Clusters stack destroy failed, checking for lock issues"
@@ -69,6 +70,7 @@ main() {
       -var="hub_vpc_id=${HUB_VPC_ID}" \
       -var="hub_subnet_ids=$(echo "${HUB_SUBNET_IDS}" | sed "s/'/\"/g")" \
       -var="resource_prefix=${RESOURCE_PREFIX}" \
+      -var="deployment_mode=${DEPLOYMENT_MODE:-gitlab}" \
       -var="workshop_participant_role_arn=${WS_PARTICIPANT_ROLE_ARN}" \
       -auto-approve; then
       log_error "Clusters stack destroy failed again, exiting"

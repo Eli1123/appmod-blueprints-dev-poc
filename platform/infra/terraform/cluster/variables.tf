@@ -1,3 +1,13 @@
+variable "deployment_mode" {
+  description = "Deployment mode: 'gitlab' (full platform with GitLab + IDC) or 'dev' (minimal, GitHub-based, Helm ArgoCD)"
+  type        = string
+  default     = "gitlab"
+  validation {
+    condition     = contains(["gitlab", "dev"], var.deployment_mode)
+    error_message = "deployment_mode must be 'gitlab' or 'dev'"
+  }
+}
+
 variable "hub_vpc_id" {
   description = "VPC id for Hub cluster"
   type        = string

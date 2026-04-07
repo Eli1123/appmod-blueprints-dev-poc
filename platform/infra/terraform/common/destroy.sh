@@ -13,6 +13,14 @@ ROOTDIR="$(cd ${SCRIPTDIR}/..; pwd )"
 DEPLOY_SCRIPTDIR="$SCRIPTDIR"
 source $SCRIPTDIR/../scripts/utils.sh
 
+# Deployment mode: 'gitlab' (default) or 'dev'
+export DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-gitlab}
+
+# In dev mode, automatically skip GitLab
+if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
+  export SKIP_GITLAB=true
+fi
+
 # Main destroy function
 main() {
   
@@ -67,9 +75,11 @@ main() {
     fi
   fi
   
-  # Remove GitLab resources from state, if they exist
-  if ! terraform state rm gitlab_personal_access_token.workshop || ! terraform state rm data.gitlab_user.workshop; then
-    log_warning "GitLab resources not found in state"
+  # Remove GitLab resources from state, if they exist (gitlab mode only)
+  if [[ "${DEPLOYMENT_MODE}" != "dev" ]]; then
+    if ! terraform state rm gitlab_personal_access_token.workshop || ! terraform state rm data.gitlab_user.workshop; then
+      log_warning "GitLab resources not found in state"
+    fi
   fi
 
   # Remove data sources that may reference resources already deleted by ArgoCD cleanup
@@ -81,6 +91,7 @@ main() {
   log "Destroying bootstrap resources..."
   if ! terraform -chdir=$DEPLOY_SCRIPTDIR destroy \
     -var-file="${GENERATED_TFVAR_FILE}" \
+    -var="deployment_mode=${DEPLOYMENT_MODE}" \
     -var="gitlab_domain_name=${GITLAB_DOMAIN:-""}" \
     -var="gitlab_security_groups=${GITLAB_SG_ID:-""}" \
     -var="ide_password=${USER1_PASSWORD}" \
@@ -102,6 +113,7 @@ main() {
     log_warning "Retrying destroy after lock handling"
     if ! terraform -chdir=$DEPLOY_SCRIPTDIR destroy \
       -var-file="${GENERATED_TFVAR_FILE}" \
+      -var="deployment_mode=${DEPLOYMENT_MODE}" \
       -var="gitlab_domain_name=${GITLAB_DOMAIN:-""}" \
       -var="gitlab_security_groups=${GITLAB_SG_ID:-""}" \
       -var="ide_password=${USER1_PASSWORD}" \

@@ -157,11 +157,16 @@ data:
       # workingDirectory: /tmp # Use this to configure a working directory for the scaffolder, defaults to the OS temp-dir
 
     integrations:
+{{- if .Values.gitlab_domain_name }}
       gitlab:
         - token: ${GIT_PASSWORD}
           apiBaseUrl: https://${GIT_HOSTNAME}/api/v4
           baseUrl: https://${GIT_HOSTNAME}
           host: ${GIT_HOSTNAME}
+{{- else }}
+      github:
+        - host: github.com
+{{- end }}
     #  gitea:
     #   - baseUrl: https://cnoe.localtest.me:8443/gitea
     #     host: cnoe.localtest.me:8443
@@ -226,11 +231,19 @@ data:
       rules:
         - allow: [Component, System, API, Resource, Location, Template]
       locations:
+{{- if .Values.gitlab_domain_name }}
         # Templates from Gitlab.
         - type: url
           target: https://${GIT_HOSTNAME}/${GIT_USERNAME}/${WORKING_REPO}/-/blob/main/platform/backstage/templates/catalog-info.yaml
           rules:
             - allow: [ Component, System, API, Resource, Location, Template, User, Group ]
+{{- else }}
+        # Templates from GitHub (dev mode — no GitLab).
+        - type: url
+          target: https://github.com/aws-samples/appmod-blueprints/blob/main/platform/backstage/templates/catalog-info.yaml
+          rules:
+            - allow: [ Component, System, API, Resource, Location, Template, User, Group ]
+{{- end }}
     kubernetes:
       serviceLocatorMethod:
         type: 'multiTenant'

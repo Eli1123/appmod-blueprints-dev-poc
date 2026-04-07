@@ -33,10 +33,12 @@ locals {
   keycloak_saml_url       = "http://${local.ingress_domain_name}/keycloak/realms/${local.keycloak_realm}/protocol/saml/descriptor"
   # git_hostname              = var.repo == "" ? "${local.gitlab_domain_name}" : var.git_hostname
   backstage_image          = var.backstage_image == "" ? "${data.aws_caller_identity.current.account_id}.dkr.ecr.${local.region}.amazonaws.com/${var.resource_prefix}-backstage:latest" : var.backstage_image
-  gitops_addons_repo_url   = local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url
-  gitops_fleet_repo_url    = local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url
-  gitops_workload_repo_url = local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url
-  gitops_platform_repo_url = local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url
+  # In dev mode: always use GitHub URLs (no GitLab)
+  # In gitlab mode: use GitLab URLs if available, fall back to GitHub
+  gitops_addons_repo_url   = var.deployment_mode == "dev" ? var.repo.url : (local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url)
+  gitops_fleet_repo_url    = var.deployment_mode == "dev" ? var.repo.url : (local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url)
+  gitops_workload_repo_url = var.deployment_mode == "dev" ? var.repo.url : (local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url)
+  gitops_platform_repo_url = var.deployment_mode == "dev" ? var.repo.url : (local.gitlab_domain_name != "" ? "https://${local.gitlab_domain_name}/${var.git_username}/platform-on-eks-workshop.git" : var.repo.url)
 
   external_secrets = {
     namespace       = "external-secrets"

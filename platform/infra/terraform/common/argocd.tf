@@ -1,38 +1,38 @@
 ################################################################################
 # GitOps Bridge: Bootstrap
 ################################################################################
-# Creating Namespace for better cleanup of ArgoCD helm release
-# resource "kubernetes_namespace" "argocd" {
-#   metadata {
-#     name = local.argocd_namespace
-#   }
-# }
 
 module "gitops_bridge_bootstrap" {
   source  = "gitops-bridge-dev/gitops-bridge/helm"
   version = "0.1.0"
   
-  create  = true
-  install = true  # Install ArgoCD via Helm (needed when EKS ArgoCD Capability is not available)
+  create = true
+
+  # In dev mode: install ArgoCD via Helm (no EKS ArgoCD Capability)
+  # In gitlab mode: don't install via Helm (EKS ArgoCD Capability handles it)
+  install = var.deployment_mode == "dev" ? true : false
   
   cluster = {
     cluster_name = local.hub_cluster.name
     environment  = local.hub_cluster.environment
     metadata     = local.addons_metadata[local.hub_cluster_key]
     addons       = local.addons[local.hub_cluster_key]
-    server       = "https://kubernetes.default.svc"
+    # In dev mode: use in-cluster endpoint (Helm ArgoCD can't resolve ARNs)
+    # In gitlab mode: use cluster ARN (EKS Managed ArgoCD resolves ARNs natively)
+    server = var.deployment_mode == "dev" ? "https://kubernetes.default.svc" : data.aws_eks_cluster.clusters[local.hub_cluster_key].arn
   }
 
   apps = local.argocd_apps
 }
 
-# ArgoCD Git Secret
+# ArgoCD Git Secrets — only needed in gitlab mode (GitLab is a private repo)
+# In dev mode, the GitHub repo is public so no credentials are needed
 resource "kubernetes_secret" "git_secrets" {
   depends_on = [
     module.gitops_bridge_bootstrap,
-    gitlab_personal_access_token.workshop
   ]
-  for_each = {
+
+  for_each = var.deployment_mode == "dev" ? {} : {
     git-repo-creds = {
       secret-type = "repo-creds"
       url         = "https://${local.gitlab_domain_name}/${local.git_username}"
@@ -45,27 +45,6 @@ resource "kubernetes_secret" "git_secrets" {
       url         = "https://${local.gitlab_domain_name}/${local.git_username}/${var.working_repo}.git"
       type        = "git"
     }
-    # git-addons = {
-    #   type                    = "git"
-    #   url                     = "https://github.com/eks-fleet-management/gitops-addons-private.git"
-    #   githubAppID             = local.git_data["github_app_id"]
-    #   githubAppInstallationID = local.git_data["github_app_installation_id"]
-    #   githubAppPrivateKey     = base64decode(local.git_data["github_private_key"])
-    # }
-    # git-fleet = {
-    #   type                    = "git"
-    #   url                     = "https://github.com/eks-fleet-management/gitops-fleet.git"
-    #   githubAppID             = local.git_data["github_app_id"]
-    #   githubAppInstallationID = local.git_data["github_app_installation_id"]
-    #   githubAppPrivateKey     = base64decode(local.git_data["github_private_key"])
-    # }
-    # git-resources = {
-    #   type                    = "git"
-    #   url                     = "https://github.com/eks-fleet-management/gitops-resources.git"
-    #   githubAppID             = local.git_data["github_app_id"]
-    #   githubAppInstallationID = local.git_data["github_app_installation_id"]
-    #   githubAppPrivateKey     = base64decode(local.git_data["github_private_key"])
-    # }
   }
   metadata {
     name      = each.key
