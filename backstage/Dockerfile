@@ -44,6 +44,10 @@ RUN --mount=type=cache,target=/home/node/.cache/yarn,sharing=locked,uid=1000,gid
 
 COPY --chown=node:node . .
 
+# Remove GitLab scaffolder plugin to avoid type conflicts in dev builds
+# (has dependency version mismatch with @backstage/integration)
+RUN rm -rf plugins/scaffolder-backend-module-gitlab
+
 RUN yarn tsc
 RUN yarn --cwd packages/backend build
 
