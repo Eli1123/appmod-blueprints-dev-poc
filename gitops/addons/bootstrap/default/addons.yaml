@@ -57,11 +57,14 @@ argocd:
       cm:
         url: https://{{.metadata.annotations.ingress_domain_name}}/argocd
         oidc.config: |
-          name: Keycloak
-          issuer: https://{{.metadata.annotations.ingress_domain_name}}/keycloak/realms/platform
-          clientID: argocd
-          enablePKCEAuthentication: true
+          name: Okta
+          issuer: https://integrator-8021951.okta.com
+          clientID: 0oa11q5hs1ex6xcV1698
+          clientSecret: $argocd-okta-secret:oidc.okta.clientSecret
           requestedScopes: ["openid", "profile", "email", "groups"]
+      rbac:
+        policy.csv: |
+          g, Everyone, role:admin
 
 ack-iam:
   enabled: false

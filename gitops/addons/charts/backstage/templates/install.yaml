@@ -211,12 +211,22 @@ data:
       session:
         secret: MW2sV-sIPngEl26vAzatV-6VqfsgAx4bPIz7PuE_2Lk=
       providers:
+{{- if .Values.gitlab_domain_name }}
         keycloak-oidc:
           development:
             metadataUrl: ${KEYCLOAK_NAME_METADATA}
             clientId: backstage
             clientSecret: ${KEYCLOAK_CLIENT_SECRET}
             prompt: auto
+{{- else }}
+        oidc:
+          development:
+            metadataUrl: https://integrator-8021951.okta.com/.well-known/openid-configuration
+            clientId: 0oa11q5qoyhKUvipc698
+            clientSecret: ${OKTA_CLIENT_SECRET}
+            prompt: auto
+            scope: openid profile email groups
+{{- end }}
 
     scaffolder:
       # see https://backstage.io/docs/features/software-templates/configuration for software template options
@@ -513,8 +523,13 @@ spec:
           envFrom:
             - secretRef:
                 name: backstage-env-vars
+{{- if .Values.gitlab_domain_name }}
             - secretRef:
                 name: backstage-oidc-vars
+{{- else }}
+            - secretRef:
+                name: backstage-okta-vars
+{{- end }}
             - secretRef:
                 name: backstage-postgres-vars
             - secretRef:
