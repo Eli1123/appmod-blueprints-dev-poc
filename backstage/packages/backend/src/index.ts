@@ -1,5 +1,5 @@
 import { createBackend } from '@backstage/backend-defaults';
-import { authModuleKeycloakOIDCProvider } from './plugins/auth';
+import { authModuleOIDCProvider } from './plugins/auth';
 import { kroBackendModule } from './plugins/kro';
 import { catalogKroModule } from './plugins/catalog-kro-module';
 import { kubernetesIngestorKroModule } from './plugins/kubernetes-ingestor-kro-module';
@@ -13,7 +13,6 @@ backend.add(import('@backstage/plugin-app-backend'));
 backend.add(import('@backstage/plugin-proxy-backend'));
 backend.add(import('@backstage/plugin-scaffolder-backend'));
 backend.add(import('@backstage/plugin-scaffolder-backend-module-github'));
-backend.add(import('@internal/plugin-scaffolder-backend-module-gitlab'));
 backend.add(import('@devangelista/backstage-scaffolder-kubernetes'));
 backend.add(import('@backstage/plugin-techdocs-backend'));
 
@@ -33,9 +32,6 @@ backend.add(import('@backstage/plugin-catalog-backend'));
 backend.add(
   import('@backstage/plugin-catalog-backend-module-scaffolder-entity-model'),
 );
-
-// Add GitLab integration for catalog processing
-backend.add(import('@backstage/plugin-catalog-backend-module-gitlab'));
 
 // See https://backstage.io/docs/features/software-catalog/configuration#subscribing-to-catalog-errors
 backend.add(import('@backstage/plugin-catalog-backend-module-logs'));
@@ -68,7 +64,7 @@ backend.add(import('@terasky/backstage-plugin-kubernetes-ingestor'));
 backend.add(import('@terasky/backstage-plugin-kro-resources-backend'));
 
 // Internal Developer Platform custom plugins
-backend.add(authModuleKeycloakOIDCProvider);
+backend.add(authModuleOIDCProvider);
 
 // Enhanced Kro plugin configuration with error handling
 backend.add(kroBackendModule);

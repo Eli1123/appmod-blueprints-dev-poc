@@ -14,9 +14,11 @@ import {
   OidcAuthResult,
 } from '@backstage/plugin-auth-backend-module-oidc-provider';
 
-export const authModuleKeycloakOIDCProvider = createBackendModule({
+// Generic OIDC auth provider — works with any OIDC-compliant IdP (Okta, Keycloak, Auth0, etc.)
+// The providerId 'oidc' matches the frontend's ssoAuthApiRef and the app-config auth.providers.oidc section
+export const authModuleOIDCProvider = createBackendModule({
   pluginId: 'auth',
-  moduleId: 'keycloak-oidc',
+  moduleId: 'custom-oidc',
   register(reg) {
     reg.registerInit({
       deps: {
@@ -24,7 +26,7 @@ export const authModuleKeycloakOIDCProvider = createBackendModule({
       },
       async init({ providers }) {
         providers.registerProvider({
-          providerId: 'keycloak-oidc',
+          providerId: 'oidc',
           factory: createOAuthProviderFactory({
             authenticator: oidcAuthenticator,
             profileTransform: async (
@@ -43,7 +45,6 @@ export const authModuleKeycloakOIDCProvider = createBackendModule({
                   'Login failed, user profile does not contain a valid name',
                 );
               }
-              // should use users from catalog
               const userRef = stringifyEntityRef({
                 kind: 'User',
                 name: info.profile.displayName!,
