@@ -657,3 +657,86 @@ With the fork, changes to GitOps charts (Helm templates, values) take effect imm
 ### Phase 1 of POC Plan: COMPLETE
 
 The fork-based deployment is working. ArgoCD reads from the fork, all apps are healthy, and we can push changes that ArgoCD picks up automatically.
+
+
+---
+
+## Session 4: Okta OIDC Integration for ArgoCD
+
+### What Worked
+
+- Okta developer account (Integrator Free Plan) — free, no expiration
+- OIDC app registrations for ArgoCD, Backstage, Argo Workflows, Kargo — straightforward
+- Groups claim added to Okta default authorization server — required for RBAC
+- Okta credentials stored in AWS Secrets Manager (`peeks-hub/okta`) — synced via ExternalSecrets
+- ArgoCD `oidc.config` in `argocd-cm` ConfigMap with direct Okta issuer — works
+- ArgoCD hot-reloads ConfigMap changes without pod restart
+- Okta SSO login flow completes successfully — claims returned with user info, groups, MFA status
+
+### What Didn't Work
+
+1. **`$secret:key` syntax for clientSecret** — ArgoCD v2.10.2 crashed on startup when using `$argocd-okta-secret:oidc.okta.clientSecret` in the OIDC config. The inline secret works. This might be a version-specific issue or a syntax problem. For now, the client secret is inline in the ConfigMap (not ideal for production but works for POC).
+
+2. **Dex as OIDC middleware** — Tried configuring Dex with an Okta OIDC connector (`dex.config` in argocd-cm). Dex pod ran but refused connections on port 5556. The ArgoCD wrapper for Dex didn't properly initialize the connector. Abandoned this approach.
+
+3. **Direct `oidc.config` without Dex** — When `server.dex.server` was removed from `argocd-cmd-params-cm`, the ArgoCD server crashed on startup. The server requires the Dex server config to be present even if Dex isn't used. Solution: leave `server.dex.server` unconfigured (remove the key entirely from the ConfigMap) rather than setting it to empty.
+
+4. **Token resync i/o timeout** — After successful Okta authentication, ArgoCD returned `i/o timeout` to the browser. Root cause: the Redis pod had been running for 17 hours and was in a degraded state (exec commands timed out). Restarting Redis fixed the connectivity, but the server still crashed on restart with OIDC config. Solution: apply OIDC config via hot-reload (patch ConfigMap while server is running) instead of restarting the pod.
+
+5. **RBAC — empty applications after Okta login** — The `argocd-rbac-cm` ConfigMap had empty `policy.csv` and `policy.default`. Okta-authenticated users had no permissions. Fix: set `policy.default: role:admin` to give all authenticated users admin access. For production, this should be mapped to Okta groups.
+
+### ArgoCD Configuration That Works
+
+**argocd-cm ConfigMap:**
+```yaml
+data:
+  url: https://d181j7b7fhjtqq.cloudfront.net/argocd
+  oidc.config: |
+    name: Okta
+    issuer: https://integrator-8021951.okta.com
+    clientID: 0oa11q5hs1ex6xcV1698
+    clientSecret: <inline-secret>
+    requestedScopes:
+      - openid
+      - profile
+      - email
+      - groups
+  oidc.tls.insecure.skip.verify: "true"
+```
+
+**argocd-cmd-params-cm ConfigMap:**
+```yaml
+data:
+  server.rootpath: /argocd
+  server.basehref: /argocd
+  server.insecure: "true"
+  redis.server: argo-cd-argocd-redis:6379
+  # server.dex.server key REMOVED (not empty, removed entirely)
+```
+
+**argocd-rbac-cm ConfigMap:**
+```yaml
+data:
+  policy.default: role:admin
+  scopes: "[groups]"
+```
+
+**Dex:** Scaled to 0 replicas. Not needed when using `oidc.config` directly.
+
+### Other Issues Found
+
+- **ArgoCD ingress missing** — The `gitops_bridge_bootstrap` Helm module doesn't create an ingress for ArgoCD. The ArgoCD addon ApplicationSet would create it, but `enable_argocd: false` in hub-config. Had to create the ingress manually via kubectl.
+
+- **ArgoCD admin password** — The Helm install generates a random password stored in `argocd-initial-admin-secret`, not the `Password123!` we set as `ide_password`. The password is `WWKtJKbeLbzj-C9C`.
+
+- **ArgoCD server rootpath/basehref** — The Helm chart v9.4.5 uses ConfigMap keys (`server.rootpath`, `server.basehref`) instead of CLI args. The values file's `extraArgs` with `--rootpath` and `--basehref` are ignored.
+
+### Componentization Friction Points Identified
+
+1. **ArgoCD installed by Helm module but not self-managed** — The `gitops_bridge_bootstrap` module installs ArgoCD but doesn't create an ArgoCD Application to manage it. This means ArgoCD config changes (OIDC, RBAC, ingress) must be done via kubectl patches, not through GitOps. The addon ApplicationSet could manage it, but it's disabled because the hub-config has `enable_argocd: false`.
+
+2. **Identity provider config is scattered** — OIDC config is in `argocd-cm`, RBAC is in `argocd-rbac-cm`, TLS settings are in `argocd-cmd-params-cm`, and the Dex config is also in `argocd-cm`. Swapping identity providers requires touching multiple ConfigMaps.
+
+3. **No abstraction for identity provider** — The platform has no concept of "identity provider" as a pluggable component. Keycloak is hardcoded in chart templates, ArgoCD values, and Backstage config. Swapping to Okta required manual ConfigMap patches rather than changing a single config value.
+
+4. **Secrets management for OIDC** — The `$secret:key` reference syntax didn't work, forcing inline secrets in ConfigMaps. This is a security concern for production. Need to investigate if newer ArgoCD versions fix this or if there's a different syntax.

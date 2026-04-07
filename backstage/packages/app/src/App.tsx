@@ -20,7 +20,7 @@ import {
 import { TechDocsAddons } from '@backstage/plugin-techdocs-react';
 import { ReportIssue } from '@backstage/plugin-techdocs-module-addons-contrib';
 import { UserSettingsPage } from '@backstage/plugin-user-settings';
-import { apis, keycloakOIDCAuthApiRef } from './apis';
+import { apis, ssoAuthApiRef } from './apis';
 import { configApiRef, useApi } from "@backstage/core-plugin-api";
 import { entityPage } from './components/catalog/EntityPage';
 import { searchPage } from './components/search/SearchPage';
@@ -96,14 +96,20 @@ const app = createApp({
       if (configApi.getString('auth.environment') === 'local') {
         return <SignInPage {...props} auto providers={['guest']} />;
       }
+
+      // Read sign-in page config from app-config.yaml
+      const providerId = configApi.getOptionalString('auth.sso.providerId') ?? 'oidc';
+      const providerTitle = configApi.getOptionalString('auth.sso.providerTitle') ?? 'SSO';
+      const providerMessage = configApi.getOptionalString('auth.sso.providerMessage') ?? `Sign in using ${providerTitle}`;
+
       return (
         <SignInPage
           {...props}
           provider={{
-            id: 'keycloak-oidc',
-            title: 'Keycloak',
-            message: 'Sign in using Keycloak',
-            apiRef: keycloakOIDCAuthApiRef,
+            id: providerId,
+            title: providerTitle,
+            message: providerMessage,
+            apiRef: ssoAuthApiRef,
           }}
         />
       );

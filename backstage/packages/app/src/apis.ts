@@ -10,11 +10,13 @@ import {
 } from '@backstage/core-plugin-api';
 import {OAuth2} from "@backstage/core-app-api";
 
-export const keycloakOIDCAuthApiRef: ApiRef<
+// Generic SSO auth API ref — provider ID is read from config at runtime
+export const ssoAuthApiRef: ApiRef<
   OpenIdConnectApi & ProfileInfoApi & BackstageIdentityApi & SessionApi
 > = createApiRef({
-  id: 'auth.keycloak-oidc',
+  id: 'auth.oidc',
 });
+
 export const apis: AnyApiFactory[] = [
   createApiFactory({
     api: scmIntegrationsApiRef,
@@ -23,23 +25,28 @@ export const apis: AnyApiFactory[] = [
   }),
   ScmAuth.createDefaultApiFactory(),
   createApiFactory({
-    api: keycloakOIDCAuthApiRef,
+    api: ssoAuthApiRef,
     deps: {
       discoveryApi: discoveryApiRef,
       oauthRequestApi: oauthRequestApiRef,
       configApi: configApiRef,
     },
-    factory: ({ discoveryApi, oauthRequestApi, configApi }) =>
-      OAuth2.create({
+    factory: ({ discoveryApi, oauthRequestApi, configApi }) => {
+      // Read provider config from app-config.yaml
+      const providerId = configApi.getOptionalString('auth.sso.providerId') ?? 'oidc';
+      const providerTitle = configApi.getOptionalString('auth.sso.providerTitle') ?? 'SSO';
+
+      return OAuth2.create({
         discoveryApi,
         oauthRequestApi,
         provider: {
-          id: 'keycloak-oidc',
-          title: 'Keycloak OIDC',
+          id: providerId,
+          title: providerTitle,
           icon: () => null,
         },
         environment: configApi.getOptionalString('auth.environment'),
         defaultScopes: ['openid', 'profile', 'email', 'groups'],
-      }),
+      });
+    },
   }),
 ];

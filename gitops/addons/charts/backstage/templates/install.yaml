@@ -210,6 +210,10 @@ data:
       environment: development
       session:
         secret: MW2sV-sIPngEl26vAzatV-6VqfsgAx4bPIz7PuE_2Lk=
+      sso:
+        providerId: oidc
+        providerTitle: Okta
+        providerMessage: Sign in using Okta
       providers:
 {{- if .Values.gitlab_domain_name }}
         keycloak-oidc:
