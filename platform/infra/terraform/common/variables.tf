@@ -69,7 +69,7 @@ variable "repo" {
     basepath = string
   })
   default = {
-    url      = "https://github.com/aws-samples/appmod-blueprints"
+    url      = "https://github.com/Eli1123/appmod-blueprints-dev-poc"
     revision = "main"
     path     = "bootstrap"
     basepath = "gitops/fleet/"
