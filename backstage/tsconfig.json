@@ -14,7 +14,8 @@
     "**/*.test.tsx",
     "**/*.spec.ts",
     "**/*.spec.tsx",
-    "**/__tests__/**/*"
+    "**/__tests__/**/*",
+    "plugins/scaffolder-backend-module-gitlab/**/*"
   ],
   "compilerOptions": {
     "outDir": "dist-types",
