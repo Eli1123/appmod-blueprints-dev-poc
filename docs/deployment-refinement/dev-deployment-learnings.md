@@ -740,3 +740,86 @@ data:
 3. **No abstraction for identity provider** — The platform has no concept of "identity provider" as a pluggable component. Keycloak is hardcoded in chart templates, ArgoCD values, and Backstage config. Swapping to Okta required manual ConfigMap patches rather than changing a single config value.
 
 4. **Secrets management for OIDC** — The `$secret:key` reference syntax didn't work, forcing inline secrets in ConfigMaps. This is a security concern for production. Need to investigate if newer ArgoCD versions fix this or if there's a different syntax.
+
+
+---
+
+## Session 5: Backstage Image Build + Okta Integration Continued
+
+### Backstage Frontend Auth — The Core Problem
+
+The Backstage Docker image (`public.ecr.aws/seb-demo/backstage:latest`) was pre-built by the workshop team and published to a public ECR. The source code in the repo was never built by anyone deploying the platform — it was reference code only. The frontend has the auth provider ID hardcoded as `keycloak-oidc` in two files:
+
+- `backstage/packages/app/src/apis.ts` — `createApiRef({ id: 'auth.keycloak-oidc' })` and `OAuth2.create({ provider: { id: 'keycloak-oidc' } })`
+- `backstage/packages/app/src/App.tsx` — `<SignInPage provider={{ id: 'keycloak-oidc', title: 'Keycloak' }}>`
+
+The backend has `plugin-auth-backend-module-oidc-provider` which registers as `oidc`. The frontend calls `keycloak-oidc`, the backend only knows `oidc` → 404 on login.
+
+### What We Changed — Config-Driven Auth
+
+Made the auth provider configurable via `app-config.yaml` instead of hardcoded:
+
+**`backstage/packages/app/src/apis.ts`:**
+- Renamed `keycloakOIDCAuthApiRef` to `ssoAuthApiRef`
+- Changed `createApiRef` ID to `auth.oidc`
+- Factory reads `auth.sso.providerId` and `auth.sso.providerTitle` from config at runtime
+- Falls back to `oidc` and `SSO` if not configured
+
+**`backstage/packages/app/src/App.tsx`:**
+- Sign-in page reads `auth.sso.providerId`, `auth.sso.providerTitle`, `auth.sso.providerMessage` from config
+- No more hardcoded provider name or title
+
+**`gitops/addons/charts/backstage/templates/install.yaml`:**
+- Added `auth.sso` config section with `providerId`, `providerTitle`, `providerMessage`
+- These values are set in the chart template and can be changed per deployment
+
+### Building the Image — Issues Encountered
+
+#### Issue 1: Local Podman VM Crashes
+- Podman Desktop on macOS with `libkrun` VM type is unstable
+- `krunkit exited unexpectedly with exit code 2` when starting from CLI
+- Works when started from Podman Desktop GUI but crashes during large builds
+- Even with 8-9GB memory, the Backstage build (3000+ npm packages, native module compilation) overwhelms the VM
+- **Decision:** Use AWS CodeBuild instead of local builds
+
+#### Issue 2: CodeBuild — Missing Permissions
+- Reused the `peeks-codebuild-ray-vllm` IAM role from the Ray image build
+- Role didn't have CloudWatch Logs permissions for the new project name
+- **Fix:** Added `backstage-build-logs` inline policy with `logs:CreateLogGroup/Stream/PutLogEvents` and ECR permissions
+
+#### Issue 3: CodeBuild — Buildspec Not in Repo
+- Created `backstage-buildspec.yml` at repo root but forgot to commit/push it
+- CodeBuild downloaded the source but couldn't find the buildspec
+- **Fix:** Committed and pushed the buildspec
+
+#### Issue 4: TypeScript Build — Missing Jest Types
+- `yarn tsc` failed with `Cannot find type definition file for 'jest'`
+- The parent `@backstage/cli/config/tsconfig.json` includes `"types": ["jest"]`
+- `@types/jest` is a devDependency, not available in the Docker build's production install
+- This was a pre-existing bug — nobody had built from source before
+- **Fix:** Added `"types": []` to `backstage/tsconfig.json` to override the parent config
+
+#### Issue 5: TypeScript Build — GitLab Plugin Type Conflict
+- After fixing Jest types, `yarn tsc` failed with a type incompatibility in `plugins/scaffolder-backend-module-gitlab/src/actions/gitlab.ts`
+- Two different versions of `@backstage/integration` in the dependency tree cause `ScmIntegrationRegistry` type mismatch
+- Pre-existing dependency version conflict, not from our changes
+- **Fix:** Excluded `plugins/scaffolder-backend-module-gitlab/**/*` from tsconfig `exclude` array — we don't need the GitLab scaffolder in dev mode
+
+### CodeBuild Project Setup
+
+- Project name: `peeks-backstage-build`
+- Source: `https://github.com/Eli1123/appmod-blueprints-dev-poc.git`
+- Buildspec: `backstage-buildspec.yml` (repo root)
+- Environment: `LINUX_CONTAINER`, `BUILD_GENERAL1_LARGE`, `amazonlinux2-x86_64-standard:5.0`, privileged mode
+- Service role: `peeks-codebuild-ray-vllm` (with added permissions)
+- ECR target: `934822760716.dkr.ecr.us-west-2.amazonaws.com/peeks-backstage:latest`
+
+### Componentization Friction Points — Backstage
+
+1. **Auth provider requires image rebuild** — Changing the identity provider requires modifying frontend TypeScript code and rebuilding the entire Docker image. This is the biggest componentization gap. The fix (config-driven auth) eliminates this for future changes, but the initial rebuild is unavoidable.
+
+2. **No CI/CD for Backstage image** — The repo has no automated pipeline to build and publish the Backstage image. It was a manual process by the workshop team. Any code change requires setting up a build pipeline from scratch.
+
+3. **Build is fragile** — Pre-existing TypeScript errors (Jest types, dependency conflicts) mean the code doesn't compile cleanly. The public image was built with a different (unknown) process that worked around these issues.
+
+4. **GitLab plugin tightly coupled** — The `scaffolder-backend-module-gitlab` plugin has hardcoded GitLab dependencies that cause type conflicts. In dev mode (no GitLab), this plugin is dead weight but still affects the build.
