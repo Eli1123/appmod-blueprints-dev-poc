@@ -39,6 +39,9 @@ export OIDC_ISSUER_URL=https://<org>.okta.com
 export OIDC_CLIENT_ID=<argocd-client-id>
 export OIDC_CLIENT_SECRET=<argocd-client-secret>
 export OIDC_PROVIDER_NAME=Okta
+
+# GitHub (required for Backstage scaffolding)
+export GITHUB_TOKEN=<github-pat-with-repo-scope>
 ```
 
 ## Validation Items
@@ -105,6 +108,10 @@ export OIDC_PROVIDER_NAME=Okta
 | 5.4 | Okta login works | SSO redirects to Okta and returns authenticated | |
 | 5.5 | No GitLab crash | Pod doesn't CrashLoopBackOff (no GitLab integration errors) | |
 | 5.6 | Catalog loads | Templates visible from GitHub repo | |
+| 5.7 | Only GitHub templates shown | No GitLab-specific templates in Create page | |
+| 5.8 | system-info entity populated | Check catalog for system-info with correct gituser, account ID, etc. | |
+| 5.9 | GitHub token configured | Backstage can create repos (test with a template) | |
+| 5.10 | Scaffolding works end-to-end | Template creates GitHub repo + ArgoCD app + catalog entry | |
 
 ### Phase 6: Other Components
 
@@ -167,3 +174,7 @@ These were done via kubectl on the live deployment. On a fresh deploy, they shou
 | Argo Workflows Okta config | kubectl patch configmap | Need to add to addons.yaml or Terraform | ❌ Not yet |
 | Kargo Okta config | kubectl patch configmap | Need to add to addons.yaml or Terraform | ❌ Not yet |
 | Kargo OIDC issuer (custom auth server) | kubectl patch configmap | Need to add to addons.yaml or Terraform | ❌ Not yet |
+| GitHub PAT for Backstage scaffolder | Inline in ConfigMap | Need to add to deploy.sh as env var → Secrets Manager → ExternalSecret | ❌ Not yet |
+| GitHub-specific template catalog | Manual import via /catalog-import | Chart template uses `addons_repo_url` value for catalog location | ✅ In chart |
+| system-info entity values | Hardcoded in catalog-info-github.yaml | Should be populated by deploy.sh from env vars | ❌ Not yet |
+| Backstage custom image reference | kubectl set image | Need to add `backstage_image` variable to deploy.sh or Terraform | ❌ Not yet |
