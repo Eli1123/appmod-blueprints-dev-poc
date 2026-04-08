@@ -1202,3 +1202,65 @@ The workshop automated GitLab token creation via Terraform (`gitlab_personal_acc
 | Scaffolding | ✅ Working | GitHub publish | S3 KRO template tested end-to-end |
 | ArgoCD Apps | ✅ 58+ healthy | — | All hub and spoke addons deployed |
 | Spoke Clusters | ✅ Working | — | dev and prod clusters managed by ArgoCD |
+
+
+### Additional Items Not Previously Documented
+
+**Okta API Token:** Created an Okta API token (`kiro-api`) for programmatic access to the Okta admin API. Used to inspect claims, app configurations, and authorization server settings via `curl` commands instead of the Okta UI. Token should be revoked when no longer needed. Stored as `SSWS` bearer token.
+
+**Okta Authorization Server Setup:**
+- Added `groups` scope to the custom authorization server (`/oauth2/default`)
+- Added `groups` claim (ID Token, Always, Groups filter regex `.*`)
+- Created access policy with rule allowing Authorization Code grant for all clients
+- Discovered that `CUSTOM_URL` issuer mode requires a custom domain (not available on Integrator Free Plan)
+- ArgoCD uses the Org authorization server (`https://integrator-8021951.okta.com`) — works because it doesn't need groups claim
+- Kargo needs the custom auth server for groups — blocked by the free plan limitation
+
+**Redis as a Silent Failure Point:** ArgoCD's Redis instance can become degraded after running for extended periods (17+ hours in our case). Symptoms: `i/o timeout` on token resync, `exec` commands timing out. Fix: restart the Redis pod. This is not logged as an error by ArgoCD — it silently fails and retries. On a fresh deploy with Dex disabled, this shouldn't be an issue.
+
+**ArgoCD Ingress Not Created by Helm Module:** The `gitops_bridge_bootstrap` Helm module installs ArgoCD but does NOT create an ingress. The ArgoCD addon ApplicationSet would create it (via the values in `addons.yaml`), but `enable_argocd: false` in hub-config for dev mode. We created the ingress manually via kubectl. This needs to be added to the Terraform or the deploy script for fresh deploys.
+
+**Backstage Homepage Still Has GitLab/Keycloak Links:** The `CustomHomepage.tsx` component has hardcoded links to GitLab and Keycloak on the dashboard. These show as dead links in dev mode. Cosmetic only — doesn't affect functionality. Would need a code change and image rebuild to fix.
+
+### Files Changed Across All Sessions
+
+Total files modified or created during the POC:
+
+**Terraform (deployment infrastructure):**
+- `platform/infra/terraform/cluster/variables.tf` — deployment_mode variable
+- `platform/infra/terraform/cluster/deploy.sh` — pass deployment_mode
+- `platform/infra/terraform/cluster/destroy.sh` — pass deployment_mode
+- `platform/infra/terraform/common/variables.tf` — deployment_mode + oidc_config variables
+- `platform/infra/terraform/common/gitlab.tf` — conditional on deployment_mode
+- `platform/infra/terraform/common/argocd.tf` — conditional install/server/OIDC config
+- `platform/infra/terraform/common/secrets.tf` — conditional server/config + dev ExternalSecrets
+- `platform/infra/terraform/common/locals.tf` — conditional repo URLs
+- `platform/infra/terraform/common/deploy.sh` — DEPLOYMENT_MODE, SKIP_GITLAB, OIDC env vars
+- `platform/infra/terraform/common/destroy.sh` — DEPLOYMENT_MODE handling
+- `platform/infra/terraform/hub-config.yaml` — repo URL pointing to fork
+
+**Backstage (frontend + backend + build):**
+- `backstage/packages/app/src/apis.ts` — config-driven auth provider
+- `backstage/packages/app/src/App.tsx` — config-driven sign-in page
+- `backstage/packages/backend/src/index.ts` — removed GitLab imports
+- `backstage/packages/backend/src/plugins/auth.ts` — generic OIDC provider
+- `backstage/packages/backend/package.json` — removed GitLab dependencies
+- `backstage/tsconfig.json` — build fixes
+- `backstage/Dockerfile` — remove GitLab plugin from build
+- `backstage-buildspec.yml` — CodeBuild buildspec
+
+**GitOps (charts + templates):**
+- `gitops/addons/charts/backstage/templates/install.yaml` — conditional auth, catalog, envFrom
+- `gitops/addons/bootstrap/default/addons.yaml` — ArgoCD OIDC values, addons_repo_url for backstage
+- `platform/backstage/templates/catalog-info.yaml` — added GitHub template reference
+- `platform/backstage/templates/catalog-info-github.yaml` — NEW: GitHub-only catalog
+- `platform/backstage/templates/s3-bucket-ack-kro/template-github.yaml` — NEW: GitHub S3 template
+- `platform/backstage/templates/app-deploy/template-github.yaml` — NEW: GitHub app deploy template
+
+**Documentation:**
+- `docs/deployment-refinement/dev-deployment-learnings.md` — running log (this file)
+- `docs/deployment-refinement/dev-deployment-guide.md` — getting started guide
+- `docs/deployment-refinement/dev-poc-plan.md` — POC plan and status
+- `docs/deployment-refinement/fresh-deploy-validation.md` — NEW: validation checklist
+- `.kiro/steering/project.md` — codebase review procedure
+- `.kiro/steering/deployment-refinement.md` — updated status
