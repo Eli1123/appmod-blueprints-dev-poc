@@ -33,9 +33,59 @@ main() {
   for cluster in "${CLUSTER_NAMES[@]}"; do
       if ! cleanup_kubernetes_resources_with_fallback "$cluster"; then
         log_warning "Failed to cleanup Kubernetes resources for cluster: $cluster"
-        exit 1
+        # Don't exit in dev mode — continue with best-effort cleanup
+        if [[ "${DEPLOYMENT_MODE}" != "dev" ]]; then
+          exit 1
+        fi
       fi
   done
+
+  # Dev mode: pre-destroy cleanup for resources that block terraform destroy
+  if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
+    log "Dev mode: running pre-destroy cleanup..."
+
+    # Delete ingress-nginx to release NLB and ENIs before destroying security groups
+    for cluster in "${CLUSTER_NAMES[@]}"; do
+      log "Deleting ingress-nginx from $cluster..."
+      helm uninstall ingress-nginx -n ingress-nginx --kube-context "$cluster" 2>/dev/null || true
+    done
+
+    # Wait for NLB ENIs to be released (they block security group deletion)
+    log "Waiting 120s for NLB ENIs to release..."
+    sleep 120
+
+    # Clean up manually-created resources not in Terraform state
+    log "Cleaning up manually-created resources..."
+
+    # Delete CodeBuild project
+    aws codebuild delete-project --name peeks-backstage-build --region "${AWS_REGION}" 2>/dev/null || true
+
+    # Delete Backstage ECR repo
+    aws ecr delete-repository --repository-name peeks-backstage --region "${AWS_REGION}" --force 2>/dev/null || true
+
+    # Delete Okta secrets from Secrets Manager
+    aws secretsmanager delete-secret --secret-id peeks-hub/okta --region "${AWS_REGION}" --force-delete-without-recovery 2>/dev/null || true
+
+    # Delete CloudWatch log groups
+    for lg in "/aws/codebuild/peeks-backstage-build" "/aws/lambda/peeks-trigger-ray-neuron-build" "/aws/lambda/peeks-trigger-ray-vllm-build"; do
+      aws logs delete-log-group --log-group-name "$lg" --region "${AWS_REGION}" 2>/dev/null || true
+    done
+
+    # Delete IAM roles created by ACK (argo-rollouts) — these are outside Terraform
+    for role in "peeks-spoke-dev-argo-rollouts" "peeks-spoke-prod-argo-rollouts"; do
+      # Detach all policies first
+      for policy_arn in $(aws iam list-attached-role-policies --role-name "$role" --query 'AttachedPolicies[*].PolicyArn' --output text 2>/dev/null); do
+        aws iam detach-role-policy --role-name "$role" --policy-arn "$policy_arn" 2>/dev/null || true
+      done
+      # Delete inline policies
+      for policy_name in $(aws iam list-role-policies --role-name "$role" --query 'PolicyNames[*]' --output text 2>/dev/null); do
+        aws iam delete-role-policy --role-name "$role" --policy-name "$policy_name" 2>/dev/null || true
+      done
+      aws iam delete-role --role-name "$role" 2>/dev/null || true
+    done
+
+    log "Pre-destroy cleanup complete"
+  fi
 
   log "Starting boostrap stack destruction..."
 
@@ -81,6 +131,16 @@ main() {
       log_warning "GitLab resources not found in state"
     fi
   fi
+
+  # Dev mode: remove resources from state that cause destroy issues
+  if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
+    log "Dev mode: removing problematic resources from Terraform state..."
+    terraform state rm 'kubernetes_manifest.spoke_external_secrets["spoke1"]' 2>/dev/null || true
+    terraform state rm 'kubernetes_manifest.spoke_external_secrets["spoke2"]' 2>/dev/null || true
+  fi
+
+  # Remove data sources that may reference resources already deleted by ArgoCD cleanup
+  terraform state rm data.aws_lb.ingress_nginx 2>/dev/null || log_warning "data.aws_lb.ingress_nginx not found in state"
 
   # Remove data sources that may reference resources already deleted by ArgoCD cleanup
   terraform state rm data.aws_lb.ingress_nginx 2>/dev/null || log_warning "data.aws_lb.ingress_nginx not found in state"
@@ -152,6 +212,26 @@ main() {
   fi
 
   log_success "Bootstrap stack destroy completed successfully"
+
+  # Dev mode: post-destroy cleanup for orphaned security groups
+  if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
+    log "Dev mode: cleaning up orphaned security groups..."
+    # Find and delete security groups created by the platform (ingress SGs)
+    for sg_id in $(aws ec2 describe-security-groups --region "${AWS_REGION}" \
+      --query "SecurityGroups[?contains(GroupName,'ingress')].GroupId" --output text 2>/dev/null); do
+      log "Deleting orphaned security group: $sg_id"
+      aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION}" 2>/dev/null || \
+        log_warning "Could not delete $sg_id — may still have dependent ENIs. Retry after a few minutes."
+    done
+    # Clean up EKS cluster security groups
+    for sg_id in $(aws ec2 describe-security-groups --region "${AWS_REGION}" \
+      --query "SecurityGroups[?contains(GroupName,'eks-cluster-sg')].GroupId" --output text 2>/dev/null); do
+      log "Deleting orphaned EKS security group: $sg_id"
+      aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION}" 2>/dev/null || \
+        log_warning "Could not delete $sg_id"
+    done
+    log "Post-destroy cleanup complete. Check for remaining resources with: aws ec2 describe-security-groups --query 'SecurityGroups[?GroupName!=\`default\`]'"
+  fi
 }
 
 # Run main function

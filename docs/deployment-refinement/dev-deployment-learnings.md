@@ -1362,7 +1362,7 @@ The goal is to make each component a deployment-time choice, not a code change.
 **Componentization note:** The platform should have automated dependency updates (Renovate or Dependabot) built into the deployment pipeline to catch these proactively rather than reactively.
 
 
-### Destroy Path — Tested, Partially Works
+### Destroy Path — Tested, Partially Works, Script Updated
 
 **Common stack destroy:** Mostly succeeded. Deleted AMP scrapers, CloudFront, Grafana, Helm releases, secrets, IAM roles, pod identity associations. Failed on 4 spoke security groups with `DependencyViolation` — orphaned ENIs from the ingress-nginx NLB that take 15+ minutes to release after NLB deletion.
 
@@ -1370,9 +1370,26 @@ The goal is to make each component a deployment-time choice, not a code change.
 
 **Root cause:** The ingress-nginx Helm release creates NLBs with security groups in the spoke VPCs. When the common stack destroys the Helm release, the NLB is deleted but its ENIs linger. The security groups can't be deleted while ENIs exist. The cluster stack then can't delete the VPCs because the security groups are still there.
 
-**Fix for next deployment:** The destroy script should:
-1. Delete the ingress-nginx Helm release first and wait for NLB ENIs to be released (add a sleep or poll)
-2. Or manually delete the orphaned security groups before destroying the VPCs
-3. Or use the `force_delete_vpc` function from `common.sh` which handles this
+**Orphaned resources found after destroy:**
+- 3 VPCs (hub manually created + 2 spoke VPCs failed to delete)
+- 6 security groups (4 ingress, 1 EKS cluster, 1 RDS)
+- 1 NAT Gateway + 1 Elastic IP (hub VPC, manually created)
+- 1 S3 bucket (tfstate, manually created)
+- 1 ECR repo (peeks-backstage, manually created)
+- 1 CodeBuild project (peeks-backstage-build, manually created)
+- 3 CloudWatch log groups
+- 2 Secrets Manager secrets (devlake mysql, okta)
+- 2 IAM roles (argo-rollouts, created by ACK)
 
-**For throwaway accounts:** Just nuke the account. The destroy gets ~90% of resources but the VPC cleanup needs manual intervention or time.
+**Script improvements made:**
+1. Added pre-destroy step: delete ingress-nginx Helm release and wait 120s for NLB ENIs to release
+2. Added cleanup of manually-created resources: CodeBuild project, ECR repo, Okta secrets, CloudWatch logs, ACK-created IAM roles
+3. Added state removal for kubernetes_manifest resources that cause destroy errors
+4. Added post-destroy cleanup: delete orphaned security groups
+5. Made ArgoCD cleanup non-fatal in dev mode (continue with best-effort)
+
+**What to watch for on next destroy:**
+- Security groups may still fail if 120s isn't enough for ENI release — increase wait or add polling
+- Hub VPC and its resources (NAT, EIP, subnets, route tables, IGW) are manually created and need manual deletion
+- S3 tfstate bucket needs manual deletion (versioned bucket requires emptying first)
+- Run `aws ec2 describe-security-groups --query 'SecurityGroups[?GroupName!=\`default\`]'` after destroy to check for orphans
