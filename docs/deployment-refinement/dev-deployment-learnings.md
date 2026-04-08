@@ -1031,3 +1031,29 @@ This is a major componentization gap. Swapping identity providers requires under
 - Document the working state before making changes
 - Make one change at a time
 - If a change breaks things, revert ALL related changes (code + external config) before trying something else
+
+
+### Why ArgoCD Okta Works Currently (and what needs fixing for production)
+
+**Current state:** ArgoCD server has liveness and readiness probes REMOVED. This allows the server unlimited time to initialize the OIDC provider on startup, which takes longer than the default probe timeouts because of the Dex token resync process.
+
+**Why probes were removed:** The ArgoCD Helm chart deploys a Dex server alongside ArgoCD. Even when using `oidc.config` directly (not routing through Dex), ArgoCD v2.10 still tries to connect to Dex for token revocation checks on startup. If Dex is unconfigured (no connectors), this connection times out after ~60 seconds. The default liveness probe (10s initial delay, 1s timeout) kills the server before it finishes initializing.
+
+**What a production setup would do differently:**
+
+1. **Properly configure Dex OR fully disable it** — In production, you'd either:
+   - Configure Dex with the Okta connector (so the token resync works) and route all OIDC through Dex
+   - OR use a newer ArgoCD version (2.12+) that better handles direct OIDC without Dex
+   - OR set the Helm value `dex.enabled: false` at install time, which prevents the Dex deployment and service from being created entirely
+
+2. **Install ArgoCD with the right Helm values from the start** — Our ArgoCD was installed by `gitops_bridge_bootstrap` with default values (Dex enabled, no OIDC config). We then patched ConfigMaps manually. In production, the OIDC config would be in the Helm values from day one, and the probes would work because the OIDC provider initializes correctly when Dex is either properly configured or not deployed at all.
+
+3. **Use the `$secret:key` syntax for client secrets** — We used inline secrets in the ConfigMap because the `$secret:key` syntax caused crashes. In production, secrets should be in Kubernetes Secrets referenced by the ConfigMap, not inline. This might work with a proper Dex setup or a newer ArgoCD version.
+
+**The platform's responsibility:** The `gitops_bridge_bootstrap` Helm module should accept OIDC configuration as input variables so the identity provider is configured at install time, not patched afterward. This would mean:
+- Adding `oidc_issuer_url`, `oidc_client_id`, `oidc_client_secret` variables to the common Terraform stack
+- Passing them to the Helm values for ArgoCD
+- Setting `dex.enabled: false` when using direct OIDC
+- Configuring RBAC defaults at install time
+
+This is a key componentization improvement — identity provider should be a first-class deployment parameter, not a post-install manual configuration.

@@ -1,3 +1,15 @@
+variable "oidc_config" {
+  description = "OIDC configuration for ArgoCD SSO. When provided, configures direct OIDC auth and disables Dex."
+  type = object({
+    issuer_url    = string
+    client_id     = string
+    client_secret = string
+    name          = optional(string, "SSO")
+    scopes        = optional(list(string), ["openid", "profile", "email", "groups"])
+  })
+  default = null
+}
+
 variable "deployment_mode" {
   description = "Deployment mode: 'gitlab' (full platform with GitLab + IDC) or 'dev' (minimal, GitHub-based, Helm ArgoCD)"
   type        = string

@@ -23,6 +23,15 @@ export WORKSHOP_CLUSTERS=${WORKSHOP_CLUSTERS:-false}
 # Deployment mode: 'gitlab' (default) or 'dev' (no GitLab, no IDC, Helm ArgoCD)
 export DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-gitlab}
 
+# OIDC configuration for ArgoCD SSO (optional)
+# Set these env vars to configure OIDC at deployment time:
+#   OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_PROVIDER_NAME
+OIDC_TF_VAR=""
+if [[ -n "${OIDC_ISSUER_URL:-}" && -n "${OIDC_CLIENT_ID:-}" && -n "${OIDC_CLIENT_SECRET:-}" ]]; then
+  OIDC_TF_VAR="-var=oidc_config={issuer_url=\"${OIDC_ISSUER_URL}\",client_id=\"${OIDC_CLIENT_ID}\",client_secret=\"${OIDC_CLIENT_SECRET}\",name=\"${OIDC_PROVIDER_NAME:-SSO}\"}"
+  log "OIDC configuration detected: ${OIDC_PROVIDER_NAME:-SSO} (${OIDC_ISSUER_URL})"
+fi
+
 # In dev mode, automatically skip GitLab
 if [[ "${DEPLOYMENT_MODE}" == "dev" ]]; then
   export SKIP_GITLAB=true
@@ -177,6 +186,7 @@ main() {
         -var="git_password=${USER1_PASSWORD}" \
         -var="resource_prefix=${RESOURCE_PREFIX}" \
         -var="working_repo=${WORKING_REPO}" \
+        ${OIDC_TF_VAR} \
         -parallelism=10 -auto-approve; then
         log_success "Bootstrap stack deployment succeeded on attempt $attempt"
         return 0
