@@ -4,20 +4,28 @@
 
 Use the dev deployment mode to deploy the platform from a personal GitHub fork, with Okta as the identity provider instead of Keycloak. Validate the full developer workflow end-to-end and document what needs to change to make this solution properly componentized and usable beyond a reference implementation.
 
-## Current State
+## Current State (Updated)
 
-- Dev deployment mode is working in account `934822760716`
-- 58 ArgoCD apps, all healthy
-- ArgoCD installed via Helm, accessible at `https://d181j7b7fhjtqq.cloudfront.net/argocd`
-- Platform reads from the public `aws-samples/appmod-blueprints` repo (read-only)
-- Keycloak running as identity provider
-- Backstage running but with patched ConfigMap (chart changes not in remote repo)
-- No write-back capability (can't scaffold apps, push manifests, or do PR workflows)
+- Dev deployment mode working in account `934822760716`
+- 58+ ArgoCD apps, all healthy
+- ArgoCD with Okta SSO at `https://d181j7b7fhjtqq.cloudfront.net/argocd`
+- Backstage with Okta SSO, custom image, GitHub templates working
+- Argo Workflows with Okta SSO
+- Kargo accessible via admin login (OIDC RBAC blocked by Okta free plan)
+- Platform reads from fork `https://github.com/Eli1123/appmod-blueprints-dev-poc`
+- Backstage scaffolding creates GitHub repos and ArgoCD apps end-to-end
+- OIDC configured as deployment-time parameter (not post-install patch)
 
-## What We Want
+## What We Achieved
 
-- ArgoCD reads/writes from a GitHub fork we control
-- Backstage scaffolds apps into the fork
+- ✅ ArgoCD reads from a GitHub fork we control
+- ✅ Backstage scaffolds apps into GitHub repos
+- ✅ Okta provides SSO for ArgoCD, Backstage, Argo Workflows
+- ✅ Full developer workflow: Backstage template → GitHub repo → ArgoCD sync → deployment
+- ✅ OIDC as deployment-time config (not post-install patch)
+- ✅ Config-driven templates (no hardcoded values)
+- ⚠️ Kargo OIDC RBAC blocked by Okta free plan (admin login works)
+- 📋 Componentization findings documented throughout
 - Okta provides SSO for all platform components
 - Full developer workflow: Backstage template → git commit → ArgoCD sync → deployment
 - Document every friction point for componentization

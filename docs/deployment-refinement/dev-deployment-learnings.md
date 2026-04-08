@@ -1135,3 +1135,70 @@ The Backstage templates are tightly coupled to GitLab:
 5. Or better: use a single `publish:git` action that works with any provider
 
 **Immediate workaround:** Modify one template to use `publish:github` and test the full workflow with our fork.
+
+
+### Backstage Scaffolding — GitHub Template Working
+
+**Test:** Created "S3 Bucket (KRO) — GitHub" template using `publish:github` action. Ran it with bucket name `test-s3-v5`.
+
+**Result:** Full pipeline completed successfully:
+1. Template rendered with parameters
+2. GitHub repo `Eli1123/test-s3-v5` created and code pushed
+3. ArgoCD Application `test-s3-v5` created on the hub cluster
+4. Component registered in Backstage catalog
+
+**Issues encountered along the way:**
+
+1. **`publish:gitlab` not registered** — First attempt used the original GitLab template. Our custom Backstage image doesn't have the GitLab scaffolder module, so `publish:gitlab` action was not found. Expected behavior in dev mode.
+
+2. **GitHub token not picked up from env var** — Added `GITHUB_TOKEN` to the `git-credentials` secret, but ExternalSecrets overwrote it on the next reconciliation cycle (60s). Had to put the token directly in the Backstage ConfigMap instead of using `${GITHUB_TOKEN}` env var reference.
+
+3. **Fine-grained GitHub PAT can't push to newly created repos** — Fine-grained tokens with "All repositories" access don't automatically get access to repos created after the token was generated. Had to switch to a classic token with `repo` scope.
+
+4. **Template not auto-discovered** — New template file pushed to fork wasn't automatically picked up by Backstage catalog. Had to manually import via `/catalog-import` URL.
+
+### Config-Driven Templates — Removing Hardcoded Values
+
+**Problem:** Initial GitHub templates had hardcoded values (`Eli1123`, `934822760716`, `peeks-hub`, CloudFront domain).
+
+**Fix:** Updated templates to read all dynamic values from the `system-info` catalog entity:
+- `gituser` — GitHub owner for repo creation
+- `aws_account_id` — for resource configuration
+- `hub_cluster_name` — for ArgoCD destination
+- `ingress_hostname` — for output links
+
+Created `catalog-info-github.yaml` with populated `system-info` entity values. To change the git owner or account, edit this file — no template changes needed.
+
+Updated the Backstage chart template to use `addons_repo_url` Helm value for the catalog location URL, so it automatically points to whatever repo is configured in `hub-config.yaml`.
+
+### GitHub-Specific Template Catalog
+
+Created a separate catalog file (`catalog-info-github.yaml`) that only includes GitHub-compatible templates:
+- S3 Bucket (KRO) — GitHub
+- App Deploy with Git Repo — GitHub  
+- App Deployment without Git Repo (unchanged — doesn't create repos)
+
+The Backstage chart conditionally loads the right catalog based on `gitlab_domain_name`:
+- If set → loads `catalog-info.yaml` (GitLab templates)
+- If empty → loads `catalog-info-github.yaml` (GitHub templates)
+
+### Componentization Finding: Git Provider Token Management
+
+The workshop automated GitLab token creation via Terraform (`gitlab_personal_access_token` resource). With GitHub, the token must be provided manually because:
+1. GitHub PATs can't be created via API without user interaction
+2. GitHub Apps would be the proper automation path but require more setup
+3. The token needs to be stored in a way that ExternalSecrets doesn't overwrite it
+
+**For production:** Use a GitHub App instead of a PAT. GitHub Apps can be created programmatically, have fine-grained permissions, and don't expire like PATs. The app's installation token would be managed by a controller or webhook.
+
+### Current Platform Status Summary
+
+| Component | Status | Auth | Notes |
+|-----------|--------|------|-------|
+| ArgoCD | ✅ Working | Okta SSO + admin login | Probes removed, OIDC via hot-reload |
+| Backstage | ✅ Working | Okta SSO | Custom image, config-driven auth, GitHub templates |
+| Argo Workflows | ✅ Working | Okta SSO | Empty (no workflows configured) |
+| Kargo | ⚠️ Partial | Admin login only | OIDC RBAC blocked by Okta free plan limitation |
+| Scaffolding | ✅ Working | GitHub publish | S3 KRO template tested end-to-end |
+| ArgoCD Apps | ✅ 58+ healthy | — | All hub and spoke addons deployed |
+| Spoke Clusters | ✅ Working | — | dev and prod clusters managed by ArgoCD |
