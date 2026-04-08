@@ -961,3 +961,73 @@ After deploying the custom image, two more issues were resolved:
 3. **RBAC mapping should be standardized** — each component has its own RBAC system (ArgoCD policy.csv, Backstage permissions, Kargo Kubernetes RBAC, Argo Workflows RBAC). Swapping IdP requires understanding all of them.
 4. **Backstage image should be buildable from CI** — the CodeBuild project works but should be part of the standard deployment pipeline, not a one-off.
 5. **Okta app registrations should be automatable** — could use Terraform Okta provider to create OIDC apps programmatically instead of manual UI clicks.
+
+
+### Kargo OIDC RBAC — Root Cause Found, Not Resolved
+
+**How Kargo RBAC actually works (from docs):**
+- Kargo does NOT use standard Kubernetes RBAC for OIDC users
+- Instead, it maps OIDC users to Kubernetes ServiceAccounts via `rbac.kargo.akuity.io/claims` annotations
+- The `kargo-admin` ServiceAccount in the `kargo` namespace has annotations that define which OIDC claims map to it
+- Kargo extracts claims from the OIDC token and matches them against ServiceAccount annotations
+
+**Why it fails with our Okta SPA app:**
+- The Okta Single-Page Application returns a minimal ID token with only `iss`, `sub`, `aud`, `exp`, `iat`, `jti`
+- No `email`, `groups`, or `name` claims in the token
+- We annotated the `kargo-admin` SA with `{"sub":["00u11q53n4ttK7GXi698"]}` but Kargo still can't match
+- Likely because Kargo fetches claims from the userinfo endpoint (not the JWT), and the SPA app's userinfo response may also be minimal
+
+**What we tried:**
+1. Kubernetes ClusterRoleBindings with various user formats — doesn't work (Kargo doesn't use K8s RBAC for OIDC)
+2. `rbac.kargo.akuity.io/claims` annotation with `sub` claim — doesn't match
+3. `rbac.kargo.akuity.io/claims` annotation with `email` claim — token doesn't have email
+4. `OIDC_ADMINS` ConfigMap key — not a real Kargo config key
+5. Debug logging — confirmed token is verified but no claim matching logs
+
+**How to fix (for future):**
+- Recreate the Kargo Okta app as a Web Application (not SPA) so it can use a client secret
+- Configure Kargo with the client secret so it can fetch full userinfo from Okta's userinfo endpoint
+- Or configure Okta to include `email` and `groups` claims in the SPA ID token (requires Okta authorization server customization)
+- The Helm values `api.oidc.admins.claims` is the proper way to configure admin access
+
+**Workaround:** Use the admin account login (password-based) for Kargo access. SSO login authenticates but lacks permissions.
+
+### Key Componentization Finding: OIDC RBAC Is Not Standardized
+
+Each platform component handles OIDC-to-permissions mapping differently:
+
+| Component | RBAC Mechanism | How OIDC Users Get Permissions |
+|-----------|---------------|-------------------------------|
+| ArgoCD | `argocd-rbac-cm` ConfigMap with `policy.csv` | `policy.default: role:admin` grants all authenticated users admin |
+| Backstage | Internal — auth provider handles identity | Any authenticated user can access (no fine-grained RBAC in POC) |
+| Argo Workflows | Kubernetes RBAC + SSO config | `rbac.enabled: false` in our config skips RBAC |
+| Kargo | ServiceAccount mapping via `rbac.kargo.akuity.io/claims` annotations | Must map OIDC claims to ServiceAccounts — most complex |
+
+This is a major componentization gap. Swapping identity providers requires understanding 4 different RBAC systems. A unified approach (e.g., all components reading from a shared RBAC config, or all using Kubernetes RBAC with a standard OIDC-to-user mapping) would significantly reduce the complexity of identity provider swaps.
+
+
+### CRITICAL LESSON: Don't Fix What Isn't Broken — ArgoCD OIDC Regression
+
+**What was working:** ArgoCD with `oidc.config` pointing directly to Okta. Login completed successfully. Users could see apps. An `i/o timeout` error appeared in the browser during login but did NOT block the login — it was a cosmetic warning from the token resync process.
+
+**What I broke and why:**
+1. Misidentified the `i/o timeout` as a blocking problem
+2. Switched from `oidc.config` (direct Okta) to `dex.config` (Dex as middleware) — this required changing the Okta redirect URI from `/argocd/auth/callback` to `/argocd/api/dex/callback`
+3. Dex didn't work (connection refused, DNS mismatch, unconfigured)
+4. Reverted the ArgoCD config back to `oidc.config` but forgot to revert the Okta redirect URI
+5. Deleted `argocd-secret` trying to fix a "data length is less than nonce size" error — this broke the server entirely because ArgoCD doesn't auto-regenerate the secret
+6. Multiple restart cycles, probe removals, and config changes created a tangled state
+
+**Time wasted:** ~1 hour going in circles
+
+**Lessons:**
+1. If login works and users can access the app, DON'T try to fix warning messages
+2. When changing redirect URIs in an IdP, ALWAYS track the change and revert it when reverting the config
+3. NEVER delete `argocd-secret` — it contains encryption keys that aren't auto-regenerated
+4. The `i/o timeout` on "Failed to resync revoked tokens" is a known ArgoCD issue when Dex is present but unconfigured — it's harmless for login functionality
+5. Keep a checklist of every external change (Okta settings, secrets, ConfigMaps) so they can be reverted atomically
+
+**How to avoid this in the future:**
+- Document the working state before making changes
+- Make one change at a time
+- If a change breaks things, revert ALL related changes (code + external config) before trying something else
