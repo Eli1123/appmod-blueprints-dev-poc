@@ -65,6 +65,8 @@ main() {
 
     # Delete Okta secrets from Secrets Manager
     aws secretsmanager delete-secret --secret-id peeks-hub/okta --region "${AWS_REGION}" --force-delete-without-recovery 2>/dev/null || true
+    # Delete DevLake secret if it wasn't cleaned up by Terraform
+    aws secretsmanager delete-secret --secret-id peeks-devlake/mysql-connection --region "${AWS_REGION}" --force-delete-without-recovery 2>/dev/null || true
 
     # Delete CloudWatch log groups
     for lg in "/aws/codebuild/peeks-backstage-build" "/aws/lambda/peeks-trigger-ray-neuron-build" "/aws/lambda/peeks-trigger-ray-vllm-build"; do
@@ -230,7 +232,17 @@ main() {
       aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION}" 2>/dev/null || \
         log_warning "Could not delete $sg_id"
     done
-    log "Post-destroy cleanup complete. Check for remaining resources with: aws ec2 describe-security-groups --query 'SecurityGroups[?GroupName!=\`default\`]'"
+    # Clean up RDS security groups
+    for sg_id in $(aws ec2 describe-security-groups --region "${AWS_REGION}" \
+      --query "SecurityGroups[?contains(GroupName,'rds-mysql-sg')].GroupId" --output text 2>/dev/null); do
+      log "Deleting orphaned RDS security group: $sg_id"
+      aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION}" 2>/dev/null || \
+        log_warning "Could not delete $sg_id"
+    done
+    log "Post-destroy cleanup complete."
+    log "NOTE: The hub VPC (${HUB_VPC_ID}) was manually created and is NOT managed by Terraform."
+    log "To delete it, run: aws ec2 delete-vpc --vpc-id ${HUB_VPC_ID} (after deleting NAT gateway, subnets, route tables, IGW)"
+    log "Check for remaining resources: aws ec2 describe-security-groups --query 'SecurityGroups[?GroupName!=\`default\`]'"
   fi
 }
 
