@@ -2,6 +2,23 @@
 
 After all the manual patching and testing on the live deployment, these items need to be validated on a clean fresh deploy to confirm the deployment-time configuration works end-to-end without manual intervention.
 
+## Pre-Deploy Prerequisites
+
+These must be in place before running any deployment scripts:
+
+| # | Prerequisite | How to Verify |
+|---|-------------|---------------|
+| 0.1 | Dedicated VPC with private subnets + NAT gateway (NOT default VPC) | `aws ec2 describe-vpcs` — needs private subnets tagged `kubernetes.io/role/internal-elb: 1` |
+| 0.2 | S3 bucket for Terraform state (versioned) | `aws s3api head-bucket --bucket <bucket>` |
+| 0.3 | Security Hub enabled | `aws securityhub describe-hub` — must not return error |
+| 0.4 | ~2-3GB free disk space | `df -h /` — Terraform providers are large |
+| 0.5 | Required CLI tools installed | aws, terraform, kubectl, helm, yq, jq |
+| 0.6 | macOS: GNU coreutils installed | `brew install coreutils` — needed for `timeout` command in scripts |
+| 0.7 | Fork of appmod-blueprints with dev mode changes pushed | `git ls-remote <fork> main` |
+| 0.8 | Okta OIDC apps created (if using Okta) | ArgoCD, Backstage, Argo Workflows, Kargo apps in Okta |
+| 0.9 | Okta groups claim configured on default authorization server | Security → API → default → Claims → groups claim with regex `.*` |
+| 0.10 | Backstage custom image built and in ECR | `aws ecr describe-images --repository-name peeks-backstage` |
+
 ## Pre-Deploy Configuration
 
 These environment variables should be set before running `deploy.sh`:
@@ -105,9 +122,29 @@ export OIDC_PROVIDER_NAME=Okta
 |-------|---------|------------|
 | ArgoCD probe timeout with OIDC | Pod restarts repeatedly | Should be fixed with Dex disabled at install time. If still occurs, increase probe timeouts or remove probes |
 | Backstage GitLab references on homepage | Dead links to GitLab and Keycloak on dashboard | Cosmetic — doesn't affect functionality. Fix by updating CustomHomepage.tsx |
-| Kargo OIDC RBAC | SSO login works but "forbidden" on list projects | Use admin account login. For OIDC RBAC, need custom auth server and proper claim mapping |
+| Kargo OIDC RBAC | SSO login works but "forbidden" on list projects | Use admin account login. For OIDC RBAC, need custom auth server (`/oauth2/default`) and proper claim mapping via ServiceAccount annotations |
 | cluster-addons Degraded | Shows Degraded in ArgoCD but all child apps are Healthy | Cosmetic — ApplicationSet health check is stricter than app health |
 | Backstage chart changes need fork | ArgoCD reads charts from remote repo | Must push chart changes to fork before they take effect |
+| macOS `grep -P` not available | Scripts produce error output for Perl regex | Non-fatal — scripts continue. Install `brew install grep` for GNU grep if needed |
+| macOS `sed -i` syntax differs | `update_workshop_var` function errors | Non-fatal — BSD sed vs GNU sed difference |
+| macOS `timeout` missing | ArgoCD readiness check loops for 30 min | Install `brew install coreutils`, add `/opt/homebrew/opt/coreutils/libexec/gnubin` to PATH |
+| Helm release failed state after timeout | Terraform keeps trying to uninstall/reinstall | Run `helm upgrade <release> --reuse-values` to flip status to deployed |
+| Backend config mismatch | "Backend configuration changed" errors | Never manually run `terraform init` — always use `deploy.sh` |
+| ExternalSecrets overwrite manual patches | kubectl patches to secrets get reverted every 60s | All fixes must go through Terraform → Secrets Manager → ExternalSecrets |
+| ArgoCD admin password | Not `Password123!` — Helm generates random password | Check `kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' \| base64 -d` |
+
+## Okta Redirect URIs Reference
+
+Each component uses a different callback path. These must match exactly in the Okta app settings:
+
+| Component | Okta App Type | Sign-in Redirect URI |
+|-----------|--------------|---------------------|
+| ArgoCD | Web Application | `https://<cloudfront>/argocd/auth/callback` |
+| Backstage | Web Application | `https://<cloudfront>/backstage/api/auth/oidc/handler/frame` |
+| Argo Workflows | Web Application | `https://<cloudfront>/argo-workflows/oauth2/callback` |
+| Kargo | Single-Page Application (PKCE) | `https://<cloudfront>/login` |
+
+**Critical:** If you change the OIDC routing (e.g., switching between direct OIDC and Dex), the redirect URI changes. Always verify the redirect URI matches after any OIDC config change.
 
 ## Items That Were Manually Patched (need to be deployment-time)
 
