@@ -1082,3 +1082,22 @@ Made OIDC a first-class deployment parameter instead of a post-install patch:
 - Argo Workflows and Kargo Okta config
 
 See `docs/deployment-refinement/fresh-deploy-validation.md` for the full checklist of what's automated vs still manual.
+
+
+### Kargo OIDC RBAC — Final Analysis
+
+**Root cause confirmed:** The Okta Integrator Free Plan cannot use `CUSTOM_URL` issuer mode (requires a custom domain). This means the Kargo SPA app must use the Org authorization server, which returns minimal ID tokens without `groups` or `email` claims. Even though we:
+- Added a `groups` scope and claim to the custom auth server
+- Created an access policy on the custom auth server
+- Annotated the `kargo-admin` ServiceAccount with `sub` claim matching
+
+The SA matching still fails because:
+1. The Org auth server token only has `sub`, `iss`, `aud`, `exp`, `iat`, `jti`
+2. Kargo verifies the token but finds no matching ServiceAccount (no log of SA lookup attempt)
+3. The `sub` claim annotation should match but Kargo v1.7.5 may require additional claims or may not support `sub`-only matching
+
+**Okta plan limitation:** The Integrator Free Plan doesn't support custom domains, which are required to use the custom authorization server (`/oauth2/default`) as the issuer for SPA apps. A paid Okta plan or Okta Workforce Identity Cloud would resolve this.
+
+**Workaround:** Admin account login (password-based) works for all Kargo operations.
+
+**For production:** Use a paid Okta plan with custom domain, configure the custom auth server as the issuer, and set `api.oidc.admins.claims` in the Kargo Helm values at install time.
