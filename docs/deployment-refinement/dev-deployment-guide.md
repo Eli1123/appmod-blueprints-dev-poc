@@ -70,6 +70,29 @@ export DEPLOYMENT_MODE=dev
 export WS_PARTICIPANT_ROLE_ARN=""
 ```
 
+### Optional: OIDC SSO (Okta or any OIDC provider)
+
+To configure ArgoCD with SSO at deployment time, set these before running `deploy.sh`:
+
+```bash
+export OIDC_ISSUER_URL=https://<your-okta-org>.okta.com
+export OIDC_CLIENT_ID=<argocd-oidc-client-id>
+export OIDC_CLIENT_SECRET=<argocd-oidc-client-secret>
+export OIDC_PROVIDER_NAME=Okta
+```
+
+This configures ArgoCD with direct OIDC (Dex disabled) at install time. For Backstage, Argo Workflows, and Kargo SSO, additional manual configuration is currently required — see `docs/deployment-refinement/dev-deployment-learnings.md` for details.
+
+### Optional: GitHub Token (for Backstage scaffolding)
+
+To enable Backstage templates to create GitHub repos:
+
+```bash
+export GITHUB_TOKEN=<github-pat-with-repo-scope>
+```
+
+This token needs `repo` scope (classic PAT). Fine-grained tokens don't work for creating new repos.
+
 ## Deployment
 
 ### Phase 1: Cluster Infrastructure (~15 min)

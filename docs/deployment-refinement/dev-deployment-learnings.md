@@ -488,7 +488,7 @@ For the current deployment, manually set the label: `kubectl label secret peeks-
 - `catalog.locations` points to `https://${GIT_HOSTNAME}/...` which is an invalid URL
 - The `@backstage/plugin-catalog-backend-module-gitlab` module crashes when parsing the empty hostname
 
-**Why not fixed:** The Backstage config is baked into the Helm chart template. Fixing it requires either:
+**Why it was initially not fixed (later resolved in Session 2 and 5):** The Backstage config is baked into the Helm chart template. Fixing it requires either:
 1. Making the template conditional (add `{{ if .Values.gitlab_domain_name }}` guards)
 2. Creating a GitHub-based catalog location as fallback
 3. Disabling the GitLab catalog module entirely in dev mode
