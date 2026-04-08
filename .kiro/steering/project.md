@@ -6,6 +6,8 @@ Platform implementation repo for the Platform Engineering on EKS workshop. Provi
 
 Companion repo: [platform-engineering-on-eks](../platform-engineering-on-eks/) handles CDK bootstrap and workshop content.
 
+POC fork: [appmod-blueprints-dev-poc](https://github.com/Eli1123/appmod-blueprints-dev-poc) — fork with dev deployment mode, GitHub + Okta integration, and componentization changes. See `.kiro/steering/deployment-refinement.md` for full context.
+
 ## Repository Layout
 
 | Path | Purpose |
