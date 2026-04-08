@@ -73,6 +73,17 @@ main() {
       aws logs delete-log-group --log-group-name "$lg" --region "${AWS_REGION}" 2>/dev/null || true
     done
 
+    # Delete RDS/Aurora clusters created by Crossplane (DevLake)
+    for cluster_id in $(aws rds describe-db-clusters --region "${AWS_REGION}" --query "DBClusters[?contains(DBClusterIdentifier,'devlake')].DBClusterIdentifier" --output text 2>/dev/null); do
+      log "Deleting RDS cluster: $cluster_id"
+      # Delete instances first
+      for instance_id in $(aws rds describe-db-instances --region "${AWS_REGION}" --query "DBInstances[?DBClusterIdentifier=='$cluster_id'].DBInstanceIdentifier" --output text 2>/dev/null); do
+        aws rds delete-db-instance --db-instance-identifier "$instance_id" --skip-final-snapshot --region "${AWS_REGION}" 2>/dev/null || true
+      done
+      # Then delete the cluster
+      aws rds delete-db-cluster --db-cluster-identifier "$cluster_id" --skip-final-snapshot --region "${AWS_REGION}" 2>/dev/null || true
+    done
+
     # Delete IAM roles created by ACK (argo-rollouts) — these are outside Terraform
     for role in "peeks-spoke-dev-argo-rollouts" "peeks-spoke-prod-argo-rollouts"; do
       # Detach all policies first
@@ -238,6 +249,13 @@ main() {
       log "Deleting orphaned RDS security group: $sg_id"
       aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION}" 2>/dev/null || \
         log_warning "Could not delete $sg_id"
+    done
+    # Clean up DB subnet groups
+    for sg_name in $(aws rds describe-db-subnet-groups --region "${AWS_REGION}" \
+      --query "DBSubnetGroups[?contains(DBSubnetGroupName,'devlake')].DBSubnetGroupName" --output text 2>/dev/null); do
+      log "Deleting orphaned DB subnet group: $sg_name"
+      aws rds delete-db-subnet-group --db-subnet-group-name "$sg_name" --region "${AWS_REGION}" 2>/dev/null || \
+        log_warning "Could not delete $sg_name — RDS cluster may still be deleting"
     done
     log "Post-destroy cleanup complete."
     log "NOTE: The hub VPC (${HUB_VPC_ID}) was manually created and is NOT managed by Terraform."
