@@ -1380,13 +1380,16 @@ The goal is to make each component a deployment-time choice, not a code change.
 - 3 CloudWatch log groups
 - 2 Secrets Manager secrets (devlake mysql, okta)
 - 2 IAM roles (argo-rollouts, created by ACK)
+- 1 Aurora MySQL cluster + 1 DB subnet group (created by Crossplane/DevLake, not in Terraform state)
 
 **Script improvements made:**
 1. Added pre-destroy step: delete ingress-nginx Helm release and wait 120s for NLB ENIs to release
 2. Added cleanup of manually-created resources: CodeBuild project, ECR repo, Okta secrets, CloudWatch logs, ACK-created IAM roles
-3. Added state removal for kubernetes_manifest resources that cause destroy errors
-4. Added post-destroy cleanup: delete orphaned security groups
-5. Made ArgoCD cleanup non-fatal in dev mode (continue with best-effort)
+3. Added cleanup of Crossplane-created resources: Aurora/RDS clusters (DevLake), DB subnet groups
+4. Added state removal for kubernetes_manifest resources that cause destroy errors
+5. Added post-destroy cleanup: delete orphaned security groups (ingress, EKS, RDS)
+6. Made ArgoCD cleanup non-fatal in dev mode (continue with best-effort)
+7. Added hub VPC reminder (manually created, not in Terraform)
 
 **What to watch for on next destroy:**
 - Security groups may still fail if 120s isn't enough for ENI release — increase wait or add polling
