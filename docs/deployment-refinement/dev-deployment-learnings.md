@@ -1337,3 +1337,26 @@ The goal is to make each component a deployment-time choice, not a code change.
 7. **Each component has its own RBAC** — ArgoCD (policy.csv), Backstage (auth provider), Kargo (ServiceAccount annotations), Argo Workflows (SSO config). Swapping identity providers means understanding all four.
 
 8. **Okta free plan has limitations** — Can't use custom authorization server as issuer for SPA apps without a custom domain. This blocks Kargo OIDC RBAC. Production Okta plans don't have this limitation.
+
+
+### Security Alerts — 70+ Container Image CVEs (Not Yet Addressed)
+
+**Issue:** Internal company scanning tool flagged 70+ container image vulnerabilities (sev 4 / low severity) across the deployment. Examples include AWS-managed EKS addon images like `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-s3-csi-driver:v2.4.1`.
+
+**Categories of affected images:**
+1. AWS-managed EKS addon images (S3 CSI driver, kube-proxy, etc.) — update by bumping EKS addon versions
+2. Third-party Helm chart images (ArgoCD, Keycloak, Crossplane, etc.) — update by bumping chart versions in `addons.yaml`
+3. Custom Backstage image — update base image and dependencies, rebuild
+4. Sample application images — update Dockerfiles in `applications/` directory
+
+**Company remediation guidance requires:**
+- Critical/High: 30 days from patch availability
+- Medium: 60 days
+- Low: 120 days
+- At least two releases per month to maintain patching SLAs
+- Enhanced scanning enabled on ECR repositories
+- `yum update --security` in Dockerfiles for AL2/AL2023 images
+
+**Status:** Not yet addressed. Documented as a follow-up workstream. For the next deployment, a version bump pass across all Helm charts and base images should be done before deploying.
+
+**Componentization note:** The platform should have automated dependency updates (Renovate or Dependabot) built into the deployment pipeline to catch these proactively rather than reactively.
