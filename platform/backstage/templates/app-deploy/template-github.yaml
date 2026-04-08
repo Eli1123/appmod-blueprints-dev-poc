@@ -1,0 +1,107 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: app-deploy-with-github-repo
+  title: App Deploy with Git Repo (GitHub)
+  description: Creates a new GitHub Repo and ArgoCD for deploying an App
+  tags:
+    - app-deploy
+    - github
+    - argocd
+spec:
+  owner: guest
+  type: service
+  parameters:
+    - title: Provide App Information
+      required:
+        - appName
+        - environment
+        - repoName
+      properties:
+        appName:
+          title: App Name
+          type: string
+          description: Name of the App
+        environment:
+          title: Environment
+          type: string
+          description: The environment (e.g., dev, prod)
+          enum: ['dev-cluster', 'prod-cluster', 'in-cluster']
+        repoName:
+          title: Repo Name
+          type: string
+          pattern: ^[a-zA-Z0-9-_.]+$
+        appNamespace:
+          title: App Namespace
+          type: string
+          description: The namespace where the app should be deployed
+          default: default
+  steps:
+    - id: fetch-base
+      name: Fetch Skeleton + Template
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          appName: ${{ parameters.appName }}
+          environment: ${{ parameters.environment }}
+    - id: publish
+      name: Publishing to GitHub repository
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.repoName }}&owner=Eli1123
+        defaultBranch: main
+        repoVisibility: public
+    - id: create-argocd-app
+      name: Create ArgoCD App
+      action: kube:apply
+      input:
+        namespaced: true
+        manifest: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: ${{ parameters.appName }}
+            namespace: argocd
+            labels:
+              backstage-name: ${{ parameters.appName }}
+            finalizers:
+            - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: default
+            destination:
+              namespace: ${{ parameters.appNamespace }}
+              name: peeks-hub
+            source:
+              repoURL: https://github.com/Eli1123/${{ parameters.repoName }}.git
+              targetRevision: HEAD
+              path: manifests
+            syncPolicy:
+              automated:
+                allowEmpty: true
+                prune: false
+                selfHeal: true
+              retry:
+                backoff:
+                  duration: 5s
+                  factor: 2
+                  maxDuration: 5m
+                limit: 10
+              syncOptions:
+              - CreateNamespace=false
+    - id: register
+      name: Register in catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: https://github.com/Eli1123/${{ parameters.repoName }}/blob/main
+        catalogInfoPath: "/catalog-info.yaml"
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: ArgoCD Application
+        url: https://d181j7b7fhjtqq.cloudfront.net/argocd/applications/argocd/${{ parameters.appName }}?view=tree
+        icon: web
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

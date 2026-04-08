@@ -1,0 +1,30 @@
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: app-mod-backstage-templates-github
+  description: App Mod Backstage Templates — GitHub Provider
+spec:
+  targets:
+    - ./s3-bucket-ack-kro/template-github.yaml
+    - ./app-deploy/template-github.yaml
+    - ./app-deploy-without-repo/template.yaml
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: system-info
+  description: Holds system information i.e, hostname, IP, OS, etc
+spec:
+  owner: guest
+  ingress_hostname: d181j7b7fhjtqq.cloudfront.net
+  gitlab_hostname: ''
+  argocd_hostname: d181j7b7fhjtqq.cloudfront.net
+  gituser: Eli1123
+  git_provider: github
+  aws_region: us-west-2
+  aws_account_id: '934822760716'
+  admin_role_name: admin
+  resource_prefix: peeks
+  hub_cluster_name: peeks-hub
+  model_s3_bucket: peeks-ray-models-934822760716
+  workshop_git_branch: main
