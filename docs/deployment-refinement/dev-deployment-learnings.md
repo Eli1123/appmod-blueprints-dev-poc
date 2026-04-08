@@ -823,3 +823,141 @@ Made the auth provider configurable via `app-config.yaml` instead of hardcoded:
 3. **Build is fragile** — Pre-existing TypeScript errors (Jest types, dependency conflicts) mean the code doesn't compile cleanly. The public image was built with a different (unknown) process that worked around these issues.
 
 4. **GitLab plugin tightly coupled** — The `scaffolder-backend-module-gitlab` plugin has hardcoded GitLab dependencies that cause type conflicts. In dev mode (no GitLab), this plugin is dead weight but still affects the build.
+
+
+### Backstage Image Build — SUCCEEDED
+
+After 4 failed attempts, the 5th CodeBuild run succeeded:
+
+| Attempt | Failure | Fix |
+|---------|---------|-----|
+| 1 | CloudWatch Logs permissions denied | Added `backstage-build-logs` inline policy to CodeBuild role |
+| 2 | Buildspec not found | Committed and pushed `backstage-buildspec.yml` to fork |
+| 3 | `yarn tsc` — Cannot find type definition for 'jest' | Added `"types": []` to tsconfig.json |
+| 4 | `yarn tsc` — GitLab scaffolder plugin type conflict (6 errors in 6 files) | Excluded plugin from tsconfig + removed from Dockerfile |
+| 5 | `yarn tsc` — backend index.ts imports deleted GitLab plugin | Removed GitLab imports from index.ts, removed GitLab deps from package.json, renamed auth module |
+
+Final successful build: `peeks-backstage-build:cfb32afa` — image pushed to `934822760716.dkr.ecr.us-west-2.amazonaws.com/peeks-backstage:latest` (363MB).
+
+### Backstage Okta SSO — WORKING
+
+After deploying the custom image, two more issues were resolved:
+
+1. **`scope` vs `additionalScopes`** — The OIDC provider config used `scope` which is deprecated. Backstage logged `Skipping oidc auth provider` with a warning about using `additionalScopes` instead. Fixed by changing the config key name.
+
+2. **Okta redirect URI mismatch** — We configured `https://.../backstage/api/auth/okta/handler/frame` in Okta but Backstage sends `https://.../backstage/api/auth/oidc/handler/frame` (using the provider ID `oidc`, not `okta`). Fixed by updating the redirect URI in the Okta Backstage app settings.
+
+### What's Working Now
+
+| Component | Okta SSO | Status |
+|-----------|----------|--------|
+| ArgoCD | ✅ Working | Login via Okta, all apps visible, admin RBAC |
+| Backstage | ✅ Working | Custom image with config-driven auth, Okta login |
+| Argo Workflows | Not yet configured | ConfigMap needs Okta SSO config |
+| Kargo | Not yet configured | ConfigMap needs Okta SSO config |
+
+### All Backstage Changes Made
+
+**Frontend (requires image rebuild):**
+- `backstage/packages/app/src/apis.ts` — Config-driven auth provider (reads `auth.sso.providerId` and `auth.sso.providerTitle` from app-config)
+- `backstage/packages/app/src/App.tsx` — Config-driven sign-in page (reads provider title/message from config)
+
+**Backend (requires image rebuild):**
+- `backstage/packages/backend/src/plugins/auth.ts` — Renamed from `keycloakOIDCProvider` to `authModuleOIDCProvider`, changed `providerId` from `keycloak-oidc` to `oidc`
+- `backstage/packages/backend/src/index.ts` — Removed GitLab plugin imports (`@internal/plugin-scaffolder-backend-module-gitlab`, `@backstage/plugin-catalog-backend-module-gitlab`), updated auth module reference
+- `backstage/packages/backend/package.json` — Removed GitLab dependencies
+
+**Build config (no rebuild needed):**
+- `backstage/tsconfig.json` — Added `"types": []`, excluded GitLab plugin from compilation
+- `backstage/Dockerfile` — Added `RUN rm -rf plugins/scaffolder-backend-module-gitlab` before `yarn tsc`
+- `backstage-buildspec.yml` — CodeBuild buildspec for building the image
+
+**Runtime config (applied via kubectl, no rebuild needed):**
+- `backstage-config` ConfigMap — `auth.sso` section with `providerId`, `providerTitle`, `providerMessage`; `auth.providers.oidc` section with Okta metadata URL, client ID, client secret ref; `additionalScopes` instead of `scope`
+- `backstage-okta-vars` secret — `OKTA_CLIENT_SECRET` synced from Secrets Manager via ExternalSecret
+- Deployment image updated to `934822760716.dkr.ecr.us-west-2.amazonaws.com/peeks-backstage:latest`
+- Deployment envFrom updated to use `backstage-okta-vars` instead of `backstage-oidc-vars`
+- Startup probe removed (was checking keycloak-oidc endpoint)
+
+**Okta app settings:**
+- Backstage redirect URI: `https://d181j7b7fhjtqq.cloudfront.net/backstage/api/auth/oidc/handler/frame`
+
+
+### Argo Workflows Okta SSO — CONFIGURED
+
+- Updated `workflow-controller-configmap` in `argo` namespace with Okta issuer URL and client credentials
+- Created `okta-oidc` secret in `argo` namespace with Argo Workflows client ID and secret
+- Restarted `argo-server` deployment
+- Server is 1/1 Running
+- Login appears to work but needs incognito window test to confirm Okta prompt (existing session cookie may bypass)
+
+### Kargo Okta SSO — CONFIGURED BUT UI NOT ACCESSIBLE
+
+- Updated `kargo-api` ConfigMap with `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID` for Okta
+- Restarted Kargo API deployment
+- Server is 1/1 Running
+- **UI issue:** `https://.../kargo` shows ArgoCD's "No routes matched" error because the Kargo ingress is configured on path `/` (root) which conflicts with other services sharing the same CloudFront domain. This is a pre-existing ingress routing issue, not Okta-related.
+
+### Updated Status
+
+| Component | Okta SSO | Accessible | Notes |
+|-----------|----------|------------|-------|
+| ArgoCD | ✅ Working | ✅ `/argocd` | Full admin access via Okta |
+| Backstage | ✅ Working | ✅ `/backstage` | Custom image with config-driven auth |
+| Argo Workflows | ✅ Configured | ✅ `/argo-workflows` | Needs incognito test to confirm Okta prompt |
+| Kargo | ✅ Configured | ❌ `/kargo` routing issue | Pre-existing ingress conflict, not Okta-related |
+
+
+### Kargo Okta SSO — PARTIALLY WORKING
+
+**What works:**
+- Kargo UI accessible at `https://d181j7b7fhjtqq.cloudfront.net/` (root path)
+- Okta SSO login flow completes successfully (redirect URI fixed to `/login`)
+- Kargo app in Okta recreated as Single-Page Application (PKCE, no client secret)
+- Admin account login works with workshop password
+
+**What doesn't work:**
+- OIDC-authenticated users get "projects.kargo.akuity.io is forbidden: list is not permitted"
+- Kubernetes RBAC ClusterRoleBindings don't resolve — tried email, sub claim, issuer-prefixed, group bindings
+- Kargo's OIDC-to-RBAC mapping is unclear — the workshop relied on Keycloak groups being mapped to Kargo roles, which we don't have with Okta
+
+**Root cause:** In the workshop, Keycloak was configured with specific groups (admin, editor, viewer) that Kargo's Helm chart maps to Kubernetes RBAC. With Okta, the groups claim exists but Kargo's internal RBAC mapping doesn't recognize them. This needs investigation into Kargo's `api.oidc` Helm values for group-to-role mapping.
+
+**Workaround:** Use the admin account login (password-based) instead of OIDC for Kargo access.
+
+### Argo Workflows Okta SSO — CONFIGURED (not fully tested)
+
+- ConfigMap updated with Okta issuer and client credentials
+- `okta-oidc` secret created in `argo` namespace
+- Server restarted and running
+- Login page loads but needs incognito test to confirm Okta prompt vs cached session
+
+### Final Okta Integration Status
+
+| Component | SSO Login | RBAC/Permissions | Notes |
+|-----------|-----------|-----------------|-------|
+| ArgoCD | ✅ Okta working | ✅ Admin for all users | `policy.default: role:admin` in argocd-rbac-cm |
+| Backstage | ✅ Okta working | ✅ Working | Custom image with config-driven auth |
+| Argo Workflows | ✅ Configured | ⚠️ Not tested | Needs incognito verification |
+| Kargo | ✅ Okta login works | ❌ OIDC RBAC broken | Admin account works as workaround |
+
+### Componentization Notes — Identity Provider Swap
+
+**What was easy:**
+- ArgoCD OIDC config — single ConfigMap patch, hot-reloads without restart
+- Argo Workflows SSO — single ConfigMap + secret, straightforward
+- Kargo OIDC issuer/client — single ConfigMap patch
+
+**What was hard:**
+- Backstage auth — required frontend code change + image rebuild (now config-driven for future swaps)
+- Backstage build — 5 failed attempts due to pre-existing TypeScript errors and GitLab plugin conflicts
+- Kargo RBAC — OIDC group-to-role mapping is opaque, no clear documentation on how to grant OIDC users access
+- Redirect URIs — each app uses a different callback path convention, had to discover by trial and error
+- ArgoCD Dex interaction — `oidc.config` vs `dex.config` confusion, Dex being unconfigured caused i/o timeouts
+
+**What needs to be componentized:**
+1. **Identity provider config should be centralized** — currently scattered across 4 different ConfigMaps in 4 namespaces. Should be one config that flows to all components.
+2. **Redirect URIs should be auto-discovered** — each app's callback path should be documented or discoverable, not guessed.
+3. **RBAC mapping should be standardized** — each component has its own RBAC system (ArgoCD policy.csv, Backstage permissions, Kargo Kubernetes RBAC, Argo Workflows RBAC). Swapping IdP requires understanding all of them.
+4. **Backstage image should be buildable from CI** — the CodeBuild project works but should be part of the standard deployment pipeline, not a one-off.
+5. **Okta app registrations should be automatable** — could use Terraform Okta provider to create OIDC apps programmatically instead of manual UI clicks.
