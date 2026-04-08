@@ -382,7 +382,7 @@ Implemented the `deployment_mode` variable (`"gitlab"` or `"dev"`) across both T
 
 The GitLab provider is a required provider in `versions.tf`. In dev mode, no GitLab resources are created (all have `count = 0`), but the provider still needs to be configured. The `early_auth_check = false` setting prevents the provider from failing during init/plan when GitLab doesn't exist. The provider config uses the default `gitlab_domain_name` variable value (`gitlab.cnoe.io`) which is harmless since no API calls are made.
 
-### Phase 1: Cluster Deployment — IN PROGRESS
+### Phase 1: Cluster Deployment — ✅ COMPLETE (was IN PROGRESS)
 
 Running `terraform apply` for the cluster stack with `deployment_mode=dev`. Plan shows 186 resources to add. EKS clusters (hub, spoke-dev, spoke-prod) being created with:
 - Auto Mode enabled
@@ -481,7 +481,7 @@ All changes are conditional on `var.deployment_mode` — the gitlab path is comp
 
 For the current deployment, manually set the label: `kubectl label secret peeks-hub -n argocd enable_gitlab=false --overwrite`. This will be overwritten on next terraform apply, but the deploy.sh fix ensures the correct value going forward.
 
-### Fix #2: Backstage CrashLoopBackOff — DOCUMENTED (not fixed)
+### Fix #2: Backstage CrashLoopBackOff — RESOLVED (was documented as not fixed, later fixed in Session 2 and Session 5)
 
 **Root cause:** Backstage's `app-config.yaml` (in `gitops/addons/charts/backstage/templates/install.yaml`) has hardcoded GitLab integration config:
 - `integrations.gitlab` section references `${GIT_HOSTNAME}` which is empty in dev mode

@@ -90,7 +90,9 @@ With a fork we control, we can push the `gitops/fleet/members/` directories dire
 
 ---
 
-## Phase 2: Okta as Identity Provider
+## Phase 2: Okta as Identity Provider — ✅ COMPLETE
+
+**What was done:** Okta Integrator Free Plan account created. OIDC apps for ArgoCD (Web), Backstage (Web), Argo Workflows (Web), Kargo (SPA/PKCE). Groups claim on default auth server. ArgoCD and Backstage SSO fully working. Argo Workflows SSO working. Kargo SSO login works but RBAC blocked by Okta free plan limitation (no custom domain for custom auth server). Custom Backstage image built via CodeBuild with config-driven auth. OIDC added as deployment-time Terraform variable.
 
 ### 2.1 Okta Setup (One-Time)
 
@@ -189,7 +191,9 @@ Both use SSO config that points to the OIDC provider. Similar pattern — swap K
 
 ---
 
-## Phase 3: Validate Developer Workflow
+## Phase 3: Validate Developer Workflow — ✅ COMPLETE
+
+**What was done:** Created GitHub-specific S3 KRO template using `publish:github`. Tested end-to-end: Backstage template → GitHub repo created → ArgoCD Application created → catalog entry registered. Required classic GitHub PAT with `repo` scope (fine-grained tokens can't push to newly created repos). Templates made config-driven — read git owner, account ID, cluster name from system-info catalog entity.
 
 ### 3.1 Backstage Template Scaffolding
 
@@ -220,7 +224,9 @@ Both use SSO config that points to the OIDC provider. Similar pattern — swap K
 
 ---
 
-## Phase 4: Document Componentization Findings
+## Phase 4: Document Componentization Findings — ✅ COMPLETE
+
+**What was done:** Comprehensive componentization summary in `dev-deployment-learnings.md` covering: what's config-driven vs hardcoded, architectural patterns to adopt, key lessons learned. Fresh deploy validation checklist in `fresh-deploy-validation.md`. Steering docs updated with full context for next session.
 
 As we go through phases 1-3, document:
 
@@ -258,14 +264,14 @@ As we go through phases 1-3, document:
 - [ ] Okta redirect URIs configured with CloudFront domain
 - [ ] AWS account `934822760716` with existing dev deployment
 
-## Estimated Timeline
+## Actual Timeline
 
-| Phase | Effort | Dependencies |
-|-------|--------|-------------|
-| Phase 1: Fork + Git | 2-3 hours | GitHub account, PAT |
-| Phase 2: Okta | 4-6 hours | Okta account, may need Backstage image rebuild |
-| Phase 3: Validate | 2-3 hours | Phases 1+2 complete |
-| Phase 4: Document | Ongoing | Notes taken during phases 1-3 |
+| Phase | Effort | Result |
+|-------|--------|--------|
+| Phase 1: Fork + Git | ~1 hour | Fork created, ArgoCD pointed to it, all apps syncing |
+| Phase 2: Okta | ~6 hours | ArgoCD + Backstage SSO working, custom image built, Kargo partial |
+| Phase 3: Validate | ~2 hours | S3 KRO template scaffolding end-to-end with GitHub |
+| Phase 4: Document | ~2 hours | Comprehensive docs, validation checklist, steering updates |
 
 Total: ~1-2 days of focused work.
 

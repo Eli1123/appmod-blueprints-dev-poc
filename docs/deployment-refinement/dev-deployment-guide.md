@@ -135,7 +135,7 @@ ArgoCD is accessible at `https://<cloudfront-domain>/argocd` with credentials `a
 
 1. **GitLab addon deploys but is non-functional** — The deploy script now automatically sets `enable_gitlab: false` in the generated tfvars when `DEPLOYMENT_MODE=dev`. On a fresh deploy, GitLab won't be deployed at all. If you see a degraded `gitlab-peeks-hub` app from a previous deploy, it will be cleaned up on the next terraform apply.
 
-2. **Backstage requires upstream chart merge** — The Backstage chart template (`gitops/addons/charts/backstage/templates/install.yaml`) has been updated locally with conditional GitLab/GitHub integration logic. However, ArgoCD in dev mode reads from the public GitHub repo which doesn't have this change. On a fresh deploy, Backstage will crash until either: (a) the chart change is merged upstream, (b) you manually patch the ConfigMap on the cluster, or (c) you point `gitops_addons_repo_revision` to a branch/fork with the fix.
+2. **Backstage requires custom image and fork** — The Backstage Docker image must be rebuilt with the config-driven auth changes (GitLab plugin removed, generic OIDC provider). Use the CodeBuild project `peeks-backstage-build` to build and push to ECR. The fork must have the chart changes (conditional auth, catalog, templates) pushed. ArgoCD reads from the fork, so chart changes take effect on push.
 
 3. **Crossplane-AWS and KubeVela may show as Missing** — ArgoCD's server-side apply can hit nil pointer errors with large CRDs. These usually resolve with a manual sync retry. This is a pre-existing ArgoCD issue, not dev-mode-specific.
 
