@@ -1360,3 +1360,19 @@ The goal is to make each component a deployment-time choice, not a code change.
 **Status:** Not yet addressed. Documented as a follow-up workstream. For the next deployment, a version bump pass across all Helm charts and base images should be done before deploying.
 
 **Componentization note:** The platform should have automated dependency updates (Renovate or Dependabot) built into the deployment pipeline to catch these proactively rather than reactively.
+
+
+### Destroy Path — Tested, Partially Works
+
+**Common stack destroy:** Mostly succeeded. Deleted AMP scrapers, CloudFront, Grafana, Helm releases, secrets, IAM roles, pod identity associations. Failed on 4 spoke security groups with `DependencyViolation` — orphaned ENIs from the ingress-nginx NLB that take 15+ minutes to release after NLB deletion.
+
+**Cluster stack destroy:** Deleted all 3 EKS clusters, capabilities, IAM roles, KMS keys. Stuck on spoke VPC deletion because the orphaned security groups (from common stack) are still in the VPCs.
+
+**Root cause:** The ingress-nginx Helm release creates NLBs with security groups in the spoke VPCs. When the common stack destroys the Helm release, the NLB is deleted but its ENIs linger. The security groups can't be deleted while ENIs exist. The cluster stack then can't delete the VPCs because the security groups are still there.
+
+**Fix for next deployment:** The destroy script should:
+1. Delete the ingress-nginx Helm release first and wait for NLB ENIs to be released (add a sleep or poll)
+2. Or manually delete the orphaned security groups before destroying the VPCs
+3. Or use the `force_delete_vpc` function from `common.sh` which handles this
+
+**For throwaway accounts:** Just nuke the account. The destroy gets ~90% of resources but the VPC cleanup needs manual intervention or time.
