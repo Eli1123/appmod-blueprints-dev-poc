@@ -1057,3 +1057,28 @@ This is a major componentization gap. Swapping identity providers requires under
 - Configuring RBAC defaults at install time
 
 This is a key componentization improvement — identity provider should be a first-class deployment parameter, not a post-install manual configuration.
+
+
+### Deployment-Time OIDC Configuration — IMPLEMENTED
+
+Made OIDC a first-class deployment parameter instead of a post-install patch:
+
+**Changes:**
+- `common/variables.tf` — Added `oidc_config` variable (issuer_url, client_id, client_secret, name, scopes)
+- `common/argocd.tf` — When `oidc_config` is set, passes OIDC config to Helm via `set_sensitive`, disables Dex via `set`, configures rootpath/basehref/insecure mode
+- `common/deploy.sh` — Reads `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_PROVIDER_NAME` env vars and passes them as `-var=oidc_config={...}` to terraform apply
+
+**What this fixes:**
+- No more manual ConfigMap patching for OIDC
+- No more Dex timeout issues (Dex is disabled at install time)
+- No more probe failures (no Dex = no startup delay)
+- ArgoCD starts with SSO working immediately
+
+**What still needs deployment-time implementation:**
+- ArgoCD RBAC default (`policy.default: role:admin`)
+- ArgoCD ingress creation
+- Backstage image override
+- Backstage Okta ExternalSecret
+- Argo Workflows and Kargo Okta config
+
+See `docs/deployment-refinement/fresh-deploy-validation.md` for the full checklist of what's automated vs still manual.
