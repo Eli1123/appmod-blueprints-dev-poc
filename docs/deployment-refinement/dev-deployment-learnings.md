@@ -1101,3 +1101,37 @@ The SA matching still fails because:
 **Workaround:** Admin account login (password-based) works for all Kargo operations.
 
 **For production:** Use a paid Okta plan with custom domain, configure the custom auth server as the issuer, and set `api.oidc.admins.claims` in the Kargo Helm values at install time.
+
+
+---
+
+## Session 6: Developer Workflow Testing (Phase 3)
+
+### Backstage Templates — GitLab Hardcoded
+
+**Test:** Tried the "S3 Bucket Template ACK with KRO" template in Backstage.
+
+**Result:** Failed at the `publish:gitlab` step. The template is hardcoded to:
+1. Use `publish:gitlab` scaffolder action (creates a GitLab repo)
+2. Reference `gitlab_hostname` from the system-info catalog entity for all URLs
+3. Create ArgoCD apps pointing to GitLab repo URLs
+4. Register catalog entries from GitLab URLs
+
+**All 12 templates have the same issue** — they reference GitLab for git operations. The templates that don't create repos ("App Deployment without Git Repo", "S3 Bucket" templates) still use GitLab for the publish step.
+
+### Componentization Finding: Templates Are Not Git-Provider-Agnostic
+
+The Backstage templates are tightly coupled to GitLab:
+- `publish:gitlab` action hardcoded (should be configurable: `publish:github`, `publish:gitlab`, `publish:bitbucket`)
+- `gitlab_hostname` referenced throughout (should be a generic `git_hostname`)
+- GitLab-specific URL patterns (`/-/blob/main/`) used for catalog registration (GitHub uses `/blob/main/`)
+- ArgoCD app source URLs use GitLab format
+
+**What needs to change for git-provider-agnostic templates:**
+1. The `system-info` catalog entity should have a generic `git_provider` field (`github`, `gitlab`, etc.)
+2. Templates should use conditional steps based on `git_provider`
+3. URL patterns should be provider-aware (GitLab uses `/-/blob/`, GitHub uses `/blob/`)
+4. The `publish` action should be selected based on provider
+5. Or better: use a single `publish:git` action that works with any provider
+
+**Immediate workaround:** Modify one template to use `publish:github` and test the full workflow with our fork.

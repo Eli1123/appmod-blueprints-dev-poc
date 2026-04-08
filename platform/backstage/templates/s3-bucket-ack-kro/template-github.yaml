@@ -1,0 +1,109 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: s3-bucket-template-ack-kro-github
+  title: S3 Bucket (KRO) — GitHub
+  description: Create S3 bucket using KRO and ACK, published to GitHub
+spec:
+  owner: user:guest
+  type: service
+  parameters:
+    - title: Provide S3 Bucket Information
+      required:
+        - bucket_name
+        - environment
+      properties:
+        bucket_name:
+          title: Bucket Name
+          type: string
+          description: Name of the S3 bucket
+        environment:
+          title: Environment
+          type: string
+          description: The environment (e.g., dev, prod)
+          enum: ['dev', 'prod']
+        region:
+          title: Region
+          type: string
+          description: AWS region for the S3 bucket
+          default: us-west-2
+        namespace:
+          default: default
+          title: Existing namespace to create this resource
+          type: string
+        configuration:
+          default: standard
+          title: Configuration of your S3 Bucket
+          type: string
+          enum: ['standard', 'intelligent-tiering']
+  steps:
+    - id: template
+      name: Fetch Skeleton + Template
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          bucket_name: ${{ parameters.bucket_name }}
+          configuration: ${{ parameters.configuration }}
+          namespace: ${{ parameters.namespace }}
+          environment: ${{ parameters.environment }}
+          region: ${{ parameters.region }}
+          accountId: "934822760716"
+          repoUrl: github.com/Eli1123
+    - id: publish
+      name: Publishing to GitHub repository
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.bucket_name }}&owner=Eli1123
+        defaultBranch: main
+        repoVisibility: public
+    - id: create-argocd-app
+      name: Create ArgoCD App
+      action: kube:apply
+      input:
+        namespaced: true
+        manifest: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: ${{ parameters.bucket_name }}
+            namespace: argocd
+            labels:
+              backstage-name: ${{ parameters.bucket_name }}
+            finalizers:
+            - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: default
+            destination:
+              namespace: ${{ parameters.namespace }}
+              name: peeks-hub
+            source:
+              repoURL: https://github.com/Eli1123/${{ parameters.bucket_name }}.git
+              targetRevision: HEAD
+              path: manifests
+            syncPolicy:
+              automated:
+                allowEmpty: true
+                prune: false
+                selfHeal: true
+              retry:
+                backoff:
+                  duration: 5s
+                  factor: 2
+                  maxDuration: 5m
+                limit: 10
+              syncOptions:
+              - CreateNamespace=false
+    - id: register
+      name: Register in catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: https://github.com/Eli1123/${{ parameters.bucket_name }}/blob/main
+        catalogInfoPath: "/catalog-info.yaml"
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: ArgoCD Application
+        url: https://d181j7b7fhjtqq.cloudfront.net/argocd/applications/argocd/${{ parameters.bucket_name }}?view=tree
+        icon: web
