@@ -254,7 +254,7 @@ data:
 {{- else }}
         # Templates from GitHub (dev mode) — uses GitHub-specific templates
         - type: url
-          target: https://github.com/Eli1123/appmod-blueprints-dev-poc/blob/main/platform/backstage/templates/catalog-info-github.yaml
+          target: {{ .Values.addons_repo_url }}/blob/main/platform/backstage/templates/catalog-info-github.yaml
           rules:
             - allow: [ Component, System, API, Resource, Location, Template, User, Group ]
 {{- end }}

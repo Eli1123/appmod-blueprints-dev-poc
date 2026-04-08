@@ -37,6 +37,11 @@ spec:
           type: string
           enum: ['standard', 'intelligent-tiering']
   steps:
+    - id: fetchSystem
+      name: Fetch System Info
+      action: catalog:fetch
+      input:
+        entityRef: system:default/system-info
     - id: template
       name: Fetch Skeleton + Template
       action: fetch:template
@@ -48,13 +53,13 @@ spec:
           namespace: ${{ parameters.namespace }}
           environment: ${{ parameters.environment }}
           region: ${{ parameters.region }}
-          accountId: "934822760716"
-          repoUrl: github.com/Eli1123
+          accountId: ${{ steps['fetchSystem'].output.entity.spec.aws_account_id }}
+          repoUrl: github.com/${{ steps['fetchSystem'].output.entity.spec.gituser }}
     - id: publish
       name: Publishing to GitHub repository
       action: publish:github
       input:
-        repoUrl: github.com?repo=${{ parameters.bucket_name }}&owner=Eli1123
+        repoUrl: github.com?repo=${{ parameters.bucket_name }}&owner=${{ steps['fetchSystem'].output.entity.spec.gituser }}
         defaultBranch: main
         repoVisibility: public
     - id: create-argocd-app
@@ -76,9 +81,9 @@ spec:
             project: default
             destination:
               namespace: ${{ parameters.namespace }}
-              name: peeks-hub
+              name: ${{ steps['fetchSystem'].output.entity.spec.hub_cluster_name }}
             source:
-              repoURL: https://github.com/Eli1123/${{ parameters.bucket_name }}.git
+              repoURL: https://github.com/${{ steps['fetchSystem'].output.entity.spec.gituser }}/${{ parameters.bucket_name }}.git
               targetRevision: HEAD
               path: manifests
             syncPolicy:
@@ -98,12 +103,12 @@ spec:
       name: Register in catalog
       action: catalog:register
       input:
-        repoContentsUrl: https://github.com/Eli1123/${{ parameters.bucket_name }}/blob/main
+        repoContentsUrl: https://github.com/${{ steps['fetchSystem'].output.entity.spec.gituser }}/${{ parameters.bucket_name }}/blob/main
         catalogInfoPath: "/catalog-info.yaml"
   output:
     links:
       - title: Repository
         url: ${{ steps.publish.output.remoteUrl }}
       - title: ArgoCD Application
-        url: https://d181j7b7fhjtqq.cloudfront.net/argocd/applications/argocd/${{ parameters.bucket_name }}?view=tree
+        url: https://${{ steps['fetchSystem'].output.entity.spec.ingress_hostname }}/argocd/applications/argocd/${{ parameters.bucket_name }}?view=tree
         icon: web
