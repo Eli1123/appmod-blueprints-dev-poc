@@ -1264,3 +1264,76 @@ Total files modified or created during the POC:
 - `docs/deployment-refinement/fresh-deploy-validation.md` — NEW: validation checklist
 - `.kiro/steering/project.md` — codebase review procedure
 - `.kiro/steering/deployment-refinement.md` — updated status
+
+
+---
+
+## Componentization Summary — What Needs to Change
+
+### The Big Picture
+
+This platform was designed as a workshop reference implementation with a monolithic deployment model: everything assumes GitLab + Keycloak + Identity Center + CDK bootstrap. Making it work with different providers (GitHub + Okta, no IDC, direct Terraform) exposed how tightly coupled the components are.
+
+The goal is to make each component a deployment-time choice, not a code change.
+
+### What's Already Config-Driven (done in this POC)
+
+| Component | How It's Configured | Config Location |
+|-----------|-------------------|-----------------|
+| ArgoCD install mode | `deployment_mode` variable | `common/variables.tf` |
+| ArgoCD OIDC | `oidc_config` variable | `common/variables.tf` → Helm values |
+| Git provider (GitLab vs GitHub) | `deployment_mode` + `repo.url` | `hub-config.yaml` |
+| GitLab resources | `count = 0` in dev mode | `common/gitlab.tf` |
+| Cluster secret format | Conditional endpoint vs ARN | `common/secrets.tf` |
+| Repo URLs | Conditional GitHub vs GitLab | `common/locals.tf` |
+| Backstage auth provider | `auth.sso.providerId` in app-config | Chart template conditional |
+| Backstage catalog | `catalog-info-github.yaml` vs `catalog-info.yaml` | Chart template conditional |
+| Template values | Read from `system-info` entity | `catalog-info-github.yaml` |
+
+### What Still Needs to Be Config-Driven (future work)
+
+| Component | Current State | Target State |
+|-----------|--------------|-------------|
+| Backstage image | Hardcoded `public.ecr.aws/seb-demo/backstage:latest` or manual ECR | Deploy-time variable for image URI |
+| Backstage GitHub token | Inline in ConfigMap (manual patch) | `GITHUB_TOKEN` env var → Secrets Manager → ExternalSecret |
+| ArgoCD RBAC default | Manual kubectl patch | Helm value at install time |
+| ArgoCD ingress | Manual kubectl create | Terraform resource or enable ArgoCD addon |
+| Argo Workflows Okta config | Manual ConfigMap patch | Helm values via addons.yaml |
+| Kargo Okta config | Manual ConfigMap patch | Helm values via addons.yaml |
+| Backstage Okta ExternalSecret | Manual kubectl create | Terraform resource |
+| system-info entity values | Hardcoded in catalog-info-github.yaml | Populated by deploy.sh from env vars |
+| hub-config.yaml enable_gitlab | Runtime jq patch in deploy.sh | Should be a proper config field or separate hub-config-dev.yaml |
+| Backstage startup probe | Removed manually | Chart template should use correct auth endpoint |
+| Backstage homepage links | Hardcoded GitLab/Keycloak in CustomHomepage.tsx | Should read from config or be conditional |
+
+### Architectural Patterns to Adopt
+
+1. **Dockerfile build args for optional plugins** — Use `ARG INCLUDE_GITLAB=false` to conditionally include/exclude the GitLab scaffolder plugin. Same image, different build outputs. Avoids maintaining separate Dockerfiles.
+
+2. **Single gitops repo with directory structure** — Templates currently create one repo per resource (e.g., one GitHub repo per S3 bucket). Production pattern should commit manifests to a shared gitops repo in per-resource directories.
+
+3. **GitHub App instead of PAT** — GitHub Apps can be created programmatically, have fine-grained permissions, don't expire, and can be managed by Terraform. Better than personal access tokens for production.
+
+4. **Centralized identity provider config** — Currently OIDC config is scattered across 4 ConfigMaps in 4 namespaces. Should be one config source (e.g., Secrets Manager) that flows to all components via ExternalSecrets.
+
+5. **Automated image builds in CI** — The Backstage CodeBuild project works but should be triggered automatically on code changes, not manually. GitHub Actions or CodePipeline watching the fork.
+
+6. **Okta Terraform provider** — Okta app registrations were done manually in the UI. The Terraform Okta provider can create OIDC apps, configure scopes, and manage users programmatically as part of the deployment.
+
+### Key Lessons for the Next Deployment
+
+1. **Don't fix what isn't broken** — The ArgoCD `i/o timeout` was cosmetic. Trying to fix it caused a regression that took an hour to untangle.
+
+2. **Track all external changes** — When changing Okta redirect URIs, always note the old value. We lost track and went in circles.
+
+3. **Hot-reload vs cold start** — ArgoCD ConfigMap changes work via hot-reload but fail on cold start (pod restart) due to Dex timeout. The deployment-time OIDC config with Dex disabled fixes this.
+
+4. **ExternalSecrets overwrite manual patches** — Any manual kubectl patch to a secret managed by ExternalSecrets gets reverted within 60 seconds. All fixes must go through Terraform → Secrets Manager → ExternalSecrets.
+
+5. **Test in incognito** — Okta session cookies persist across tabs. Always test SSO in incognito to verify the login prompt actually works.
+
+6. **Backstage build is fragile** — Pre-existing TypeScript errors, dependency conflicts, and missing type definitions mean the code doesn't compile cleanly from source. Budget time for build fixes.
+
+7. **Each component has its own RBAC** — ArgoCD (policy.csv), Backstage (auth provider), Kargo (ServiceAccount annotations), Argo Workflows (SSO config). Swapping identity providers means understanding all four.
+
+8. **Okta free plan has limitations** — Can't use custom authorization server as issuer for SPA apps without a custom domain. This blocks Kargo OIDC RBAC. Production Okta plans don't have this limitation.
